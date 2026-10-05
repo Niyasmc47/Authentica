@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
+
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Authentica Backend"

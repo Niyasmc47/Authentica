@@ -3,6 +3,9 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+import numpy as np
+import soundfile as sf
+
 from app.core.logging import logger
 from app.schemas.analysis import SpeechSegment, SpeechResult, VideoInfo
 from app.services.detectors.base import SpeechToText
@@ -134,9 +137,14 @@ class FasterWhisperTranscriber(SpeechToText):
             )
 
         try:
+            # Read audio into float32 waveform (avoids PyAV metadata errors)
+            audio_data, sr = sf.read(str(audio_path.resolve()), dtype="float32")
+            if audio_data.ndim > 1:
+                audio_data = np.mean(audio_data, axis=1)
+
             # Transcribe with Voice Activity Detection (VAD) filter
             raw_segments, info = self.model.transcribe(
-                str(audio_path.resolve()),
+                audio_data,
                 vad_filter=True,
                 vad_parameters=dict(min_silence_duration_ms=500),
                 beam_size=5
