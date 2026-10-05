@@ -19,6 +19,7 @@ from app.services.detectors import (
     PlaceholderSpeechToText,
     PlaceholderVisualDetector,
     SpeechToText,
+    VisualDeepfakeDetector,
     VisualDetector,
 )
 from app.services.video_processor import (
@@ -70,7 +71,7 @@ class AnalysisService:
         speech_detector: Optional[SpeechToText] = None,
     ):
         self.video_processor = video_processor or VideoProcessor()
-        self.visual_detector = visual_detector or PlaceholderVisualDetector()
+        self.visual_detector = visual_detector or VisualDeepfakeDetector.get_instance()
         self.audio_detector = audio_detector or PlaceholderAudioDetector()
         self.speech_detector = speech_detector or PlaceholderSpeechToText()
 

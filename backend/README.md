@@ -77,20 +77,31 @@ In **Stage 1**, this service provides:
 
 ## 🧩 Team Member Integration Guide
 
-### 👁️ For Member 2 (Visual AI Detector)
-Implement the `VisualDetector` interface located at:
-📁 `app/services/detectors/base.py`
+### 👁️ Member 2: Visual AI Deepfake Detector (Stage 1 Implemented)
+Implemented in: 📁 `app/services/detectors/visual_detector.py`
+
+- **Model Name:** `EfficientNet-B0-FFPP-C23`
+- **Source / Repository:** [Xicor9/efficientnet-b0-ffpp-c23](https://huggingface.co/Xicor9/efficientnet-b0-ffpp-c23)
+- **License:** MIT License
+- **Face Detector:** Google MediaPipe FaceDetector (`blaze_face_short_range.tflite`)
+- **Device Support:** Auto-selects CUDA when available; automatically falls back to CPU.
+- **Expected Input:** Video frame samples at ~1 FPS. MediaPipe locates faces, selects the primary face by maximum bounding box area, applies a 10% safety margin, and extracts RGB face crops.
+- **Preprocessing:** Resizes face crops to (224, 224), converts to PyTorch tensor in range [0.0, 1.0].
+- **Output Interpretation:**
+  - `real_score`: Softmax probability score for Class 0 (Real/Authentic)
+  - `fake_score`: Softmax probability score for Class 1 (Fake/Manipulated)
+  - Missing faces or unreadable frames return `face_detected: false`, `real_score: null`, `fake_score: null` without crashing.
+
+> ⚠️ **FORENSIC DISCLAIMER:**  
+> *Authenitca uses a pretrained research model as one forensic signal. Its output is not a calibrated probability and does not by itself establish that media is fake.*  
+> The visual detector provides evidence of facial manipulation/deepfake-style artifacts represented in its training dataset (FaceForensics++ C23: DeepFake, FaceSwap, Face2Face, NeuralTextures). Raw forensic scores are forwarded downstream for multi-modal evidence fusion.
 
 ```python
-from app.services.detectors.base import VisualDetector, FrameSample
-from app.schemas.analysis import VisualResult, VisualFrameResult, VideoInfo
+from app.services.detectors.visual_detector import VisualDeepfakeDetector
 
-class Member2VisualDetector(VisualDetector):
-    async def analyze(self, frames: list[FrameSample], video_info: VideoInfo) -> VisualResult:
-        # 1. Iterate over frame samples (each has frame.timestamp_s and frame.frame_path)
-        # 2. Run local face detector / deepfake classification model (e.g., EfficientNet, FaceForensics++)
-        # 3. Return structured VisualResult with per-frame real/fake scores
-        ...
+# Singleton access
+detector = VisualDeepfakeDetector.get_instance()
+# analyze(frames, video_info) returns VisualResult
 ```
 
 ### 🎙️ For Member 3 (Audio Spoofing & Speech-to-Text)
@@ -126,13 +137,15 @@ class Member3SpeechToText(SpeechToText):
 | **FFmpeg Media Inspection & 16kHz Audio Extraction** | ✅ Implemented | Member 1 |
 | **Ephemeral Privacy & Cleanup Manager** | ✅ Implemented | Member 1 |
 | **Shared Pydantic Data Contracts** | ✅ Implemented | Member 1 |
-| **Pluggable Detector Interfaces & Placeholders** | ✅ Implemented | Member 1 |
-| **Automated Pytest Suite (13 tests)** | ✅ Implemented | Member 1 |
-| **Visual / Face Deepfake AI Model** | ⏳ Stage 2 Integration | Member 2 |
+| **MediaPipe Face Detection & Face Cropping** | ✅ Implemented | Member 2 |
+| **EfficientNet-B0 FF++ C23 Deepfake Detector** | ✅ Implemented | Member 2 |
+| **Batched Visual Inference & CUDA/CPU Auto-Fallback** | ✅ Implemented | Member 2 |
+| **Automated Pytest Suite (21 tests)** | ✅ Implemented | Member 1 & 2 |
 | **Audio Voice Spoofing AI Model** | ⏳ Stage 2 Integration | Member 3 |
 | **Whisper Speech-to-Text Model** | ⏳ Stage 2 Integration | Member 3 |
 | **Timeline Fusion / Aggregated Fraud Risk Score** | ⏳ Stage 3 Integration | Team |
 | **Frontend UI / React Dashboard** | ⏳ Later Stage | Member 2 |
+
 
 > ⚠️ **IMPORTANT:** In Stage 1, detector interfaces return explicit `status: "unavailable"` and `available: false`. **No fake or fabricated AI detection scores are generated.**
 
@@ -277,13 +290,26 @@ curl -X POST "http://localhost:8000/api/analyses" \
     "audio_available": true
   },
   "visual": {
-    "available": false,
-    "model": null,
-    "status": "unavailable",
-    "frames_analyzed": 0,
-    "faces_found": 0,
-    "face_detection_rate": null,
-    "results": []
+    "available": true,
+    "model": "EfficientNet-B0-FFPP-C23",
+    "status": "completed",
+    "frames_analyzed": 15,
+    "faces_found": 14,
+    "face_detection_rate": 0.9333,
+    "results": [
+      {
+        "timestamp_s": 0.0,
+        "face_detected": true,
+        "real_score": 0.9124,
+        "fake_score": 0.0876
+      },
+      {
+        "timestamp_s": 1.0,
+        "face_detected": true,
+        "real_score": 0.8841,
+        "fake_score": 0.1159
+      }
+    ]
   },
   "audio": {
     "available": false,

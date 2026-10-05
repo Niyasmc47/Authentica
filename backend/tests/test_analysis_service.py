@@ -43,12 +43,13 @@ def test_post_analyses_end_to_end(test_client: TestClient, synthetic_video_path:
     assert video["height"] == 240
     assert video["frames_sampled"] >= 3
 
-    # 3. Stage 1 Contract: Explicitly unavailable placeholders, NO fabricated scores
+    # 3. Stage 1 Contract: Active VisualDetector (Member 2) + Unavailable Audio/Speech Placeholders (Member 3)
     visual = data["visual"]
-    assert visual["available"] is False
-    assert visual["status"] == "unavailable"
-    assert visual["frames_analyzed"] == 0
-    assert visual["results"] == []
+    assert visual["available"] is True
+    assert visual["status"] == "completed"
+    assert visual["model"] == "EfficientNet-B0-FFPP-C23"
+    assert visual["frames_analyzed"] >= 3
+    assert len(visual["results"]) >= 3
 
     audio = data["audio"]
     assert audio["available"] is False

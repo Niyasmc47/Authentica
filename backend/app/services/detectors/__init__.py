@@ -4,13 +4,16 @@ from .placeholders import (
     PlaceholderSpeechToText,
     PlaceholderVisualDetector,
 )
+from .visual_detector import VisualDeepfakeDetector
 
 __all__ = [
     "FrameSample",
     "VisualDetector",
+    "VisualDeepfakeDetector",
     "AudioDetector",
     "SpeechToText",
     "PlaceholderVisualDetector",
     "PlaceholderAudioDetector",
     "PlaceholderSpeechToText",
 ]
+
