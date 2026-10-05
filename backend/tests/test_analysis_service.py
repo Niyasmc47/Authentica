@@ -80,3 +80,49 @@ def test_post_analyses_corrupted_file(test_client: TestClient, temp_test_dir: Pa
     assert response.status_code == 422
     assert "detail" in response.json()
     assert "corrupt" in response.json()["detail"].lower() or "inspection failed" in response.json()["detail"].lower()
+
+
+def test_post_analyses_with_audio_end_to_end(test_client: TestClient, synthetic_video_with_audio_path: Path):
+    """
+    End-to-end integration test for POST /api/analyses with video containing audio.
+    Verifies:
+      - Visual detector produces real/fake frame scores
+      - Local audio detector produces windowed spoof scores
+      - Faster-Whisper transcriber produces speech transcription and language detection
+    """
+    with open(synthetic_video_with_audio_path, "rb") as video_file:
+        response = test_client.post(
+            "/api/analyses",
+            files={"file": (synthetic_video_with_audio_path.name, video_file, "video/mp4")}
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["status"] == "completed"
+    assert data["video"]["audio_available"] is True
+
+    # Visual branch
+    assert data["visual"]["available"] is True
+    assert data["visual"]["status"] == "completed"
+
+    # Audio branch (Member 3)
+    audio = data["audio"]
+    assert audio["available"] is True
+    assert audio["status"] == "completed"
+    assert audio["model"] == "AASIST-ASVspoof2019-LA"
+    assert audio["windows_analyzed"] >= 1
+    assert len(audio["results"]) >= 1
+    for win in audio["results"]:
+        assert win["start_s"] >= 0.0
+        assert win["end_s"] > win["start_s"]
+        assert win["spoof_score"] is not None
+        assert 0.0 <= win["spoof_score"] <= 1.0
+
+    # Speech branch (Member 3)
+    speech = data["speech"]
+    assert speech["available"] is True
+    assert speech["status"] == "completed"
+    assert speech["model"] == "faster-whisper-base-int8"
+    assert speech["language"] is not None
+    assert isinstance(speech["segments"], list)

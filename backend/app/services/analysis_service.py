@@ -15,6 +15,8 @@ from app.schemas.analysis import (
 )
 from app.services.detectors import (
     AudioDetector,
+    FasterWhisperTranscriber,
+    LocalAudioAntiSpoofDetector,
     PlaceholderAudioDetector,
     PlaceholderSpeechToText,
     PlaceholderVisualDetector,
@@ -72,8 +74,8 @@ class AnalysisService:
     ):
         self.video_processor = video_processor or VideoProcessor()
         self.visual_detector = visual_detector or VisualDeepfakeDetector.get_instance()
-        self.audio_detector = audio_detector or PlaceholderAudioDetector()
-        self.speech_detector = speech_detector or PlaceholderSpeechToText()
+        self.audio_detector = audio_detector or LocalAudioAntiSpoofDetector.get_instance()
+        self.speech_detector = speech_detector or FasterWhisperTranscriber.get_instance()
 
     async def analyze_video(self, file: UploadFile) -> AnalysisResponse:
         """

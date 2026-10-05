@@ -24,6 +24,12 @@ def check_ffmpeg_available() -> Tuple[bool, bool, Optional[str]]:
     Returns:
         (ffmpeg_installed, ffprobe_installed, error_message_if_any)
     """
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+    except Exception:
+        pass
+
     ffmpeg_path = shutil.which("ffmpeg")
     ffprobe_path = shutil.which("ffprobe")
 

@@ -45,6 +45,8 @@ class AudioResult(BaseModel):
     available: bool = Field(False, description="Whether the audio detector is active and executed")
     model: Optional[str] = Field(None, description="Name and version of the audio detector model")
     status: str = Field("unavailable", description="Status of the audio detector (e.g., unavailable, completed, error)")
+    windows_analyzed: Optional[int] = Field(None, description="Number of sliding audio windows analyzed")
+    processing_time_s: Optional[float] = Field(None, description="Inference processing time in seconds")
     results: List[AudioWindowResult] = Field(default_factory=list, description="Time-windowed audio detection results")
 
 
@@ -60,6 +62,8 @@ class SpeechResult(BaseModel):
     available: bool = Field(False, description="Whether speech-to-text is active and executed")
     model: Optional[str] = Field(None, description="Name and version of the speech-to-text model")
     status: str = Field("unavailable", description="Status of the speech transcriber")
+    language: Optional[str] = Field(None, description="Detected or configured spoken language code (e.g., 'en')")
+    processing_time_s: Optional[float] = Field(None, description="Transcription processing time in seconds")
     segments: List[SpeechSegment] = Field(default_factory=list, description="Transcribed speech segments")
 
 

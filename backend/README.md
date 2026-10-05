@@ -104,24 +104,41 @@ detector = VisualDeepfakeDetector.get_instance()
 # analyze(frames, video_info) returns VisualResult
 ```
 
-### 🎙️ For Member 3 (Audio Spoofing & Speech-to-Text)
-Implement `AudioDetector` and `SpeechToText` interfaces in:
-📁 `app/services/detectors/base.py`
+### 🎙️ Member 3: Audio AI Anti-Spoofing & Speech-to-Text (Stage 1 Implemented)
+Implemented in: 
+- 📁 `app/services/detectors/audio_detector.py`
+- 📁 `app/services/detectors/speech_transcriber.py`
+
+#### 1. Audio AI Anti-Spoofing Detector
+- **Model Name:** `AASIST-ASVspoof2019-LA`
+- **Source / Repository:** [Clova AI AASIST](https://github.com/clovaai/aasist)
+- **License:** BSD-3-Clause License
+- **Architecture:** SincNet raw waveform filterbank front-end -> 6 High-Frequency Residual Blocks with MaxFeatureMap -> Integrated Spectro-Temporal Graph Attention Network (GAT) -> Graph Pooling -> 2-class Readout Head (Bonafide vs. Spoof).
+- **Input Requirements:** 16 kHz mono raw audio waveform.
+- **Windowing Strategy:** Sliding window analysis with ~4.0-second windows (64,000 samples @ 16kHz) and ~2.0-second stride (32,000 samples). Audio shorter than 4s is padded/tiled to 64,600 samples.
+- **Output Interpretation:**
+  - `spoof_score`: Softmax probability score for Class 1 (Synthetic / Spoofed / AI Voice Clone).
+  - Window timestamps: `start_s` and `end_s`.
+- **Known Limitations & Forensic Honesty:**
+  - Pretrained on the ASVspoof 2019 Logical Access (LA) benchmark.
+  - Highly compressed audio (e.g. repeated WhatsApp/telephony transcodings) or heavy environmental background noise can introduce variance.
+  - Scores are raw forensic model outputs representing acoustic synthesis artifacts, not absolute proof.
+
+#### 2. Speech-to-Text Transcription
+- **Model Name:** `faster-whisper-base-int8`
+- **Source / Repository:** [Systran/faster-whisper](https://github.com/SYSTRAN/faster-whisper) (OpenAI Whisper architecture via CTranslate2)
+- **License:** MIT License
+- **Configuration:** `base` model running on CPU INT8 quantization (with automatic CUDA GPU acceleration if available).
+- **Features:** Automatic language identification (multilingual), Silero Voice Activity Detection (VAD) filtering to skip non-speech/silence, and segment timestamps (`start_s`, `end_s`, `text`).
+- **Clarification:** Whisper is an Automatic Speech Recognition (ASR) engine to establish *"What was said and when"*. Fraud intent heuristics belong to subsequent pipeline stages.
 
 ```python
-from app.services.detectors.base import AudioDetector, SpeechToText
-from app.schemas.analysis import AudioResult, SpeechResult, VideoInfo
-from pathlib import Path
+from app.services.detectors.audio_detector import LocalAudioAntiSpoofDetector
+from app.services.detectors.speech_transcriber import FasterWhisperTranscriber
 
-class Member3AudioDetector(AudioDetector):
-    async def analyze(self, audio_path: Path | None, video_info: VideoInfo) -> AudioResult:
-        # Analyzes the extracted 16kHz mono WAV file for voice synthesis / cloning artifacts
-        ...
-
-class Member3SpeechToText(SpeechToText):
-    async def transcribe(self, audio_path: Path | None, video_info: VideoInfo) -> SpeechResult:
-        # Transcribes audio with Whisper / open-source ASR model
-        ...
+# Singleton access
+audio_detector = LocalAudioAntiSpoofDetector.get_instance()
+speech_transcriber = FasterWhisperTranscriber.get_instance()
 ```
 
 ---
@@ -140,10 +157,13 @@ class Member3SpeechToText(SpeechToText):
 | **MediaPipe Face Detection & Face Cropping** | ✅ Implemented | Member 2 |
 | **EfficientNet-B0 FF++ C23 Deepfake Detector** | ✅ Implemented | Member 2 |
 | **Batched Visual Inference & CUDA/CPU Auto-Fallback** | ✅ Implemented | Member 2 |
-| **Automated Pytest Suite (21 tests)** | ✅ Implemented | Member 1 & 2 |
-| **Audio Voice Spoofing AI Model** | ⏳ Stage 2 Integration | Member 3 |
-| **Whisper Speech-to-Text Model** | ⏳ Stage 2 Integration | Member 3 |
-| **Timeline Fusion / Aggregated Fraud Risk Score** | ⏳ Stage 3 Integration | Team |
+| **Local Audio Anti-Spoofing AI Model (AASIST)** | ✅ Implemented | Member 3 |
+| **Sliding Window Audio Spoof Analysis (~4s window, 2s stride)** | ✅ Implemented | Member 3 |
+| **Faster-Whisper Speech-to-Text & Language Detection** | ✅ Implemented | Member 3 |
+| **Automated Pytest Suite (31 tests)** | ✅ Implemented | Team (All Passing) |
+| **Timeline Fusion / Aggregated Fraud Risk Score** | ⏳ Stage 2/3 Integration | Team |
+| **Fraud Intent & Keyword Heuristics (OTP/Transfers)** | ⏳ Stage 2 Integration | Team |
+| **C2PA Metadata Verification** | ⏳ Stage 2 Integration | Team |
 | **Frontend UI / React Dashboard** | ⏳ Later Stage | Member 2 |
 
 
@@ -312,16 +332,37 @@ curl -X POST "http://localhost:8000/api/analyses" \
     ]
   },
   "audio": {
-    "available": false,
-    "model": null,
-    "status": "unavailable",
-    "results": []
+    "available": true,
+    "model": "AASIST-ASVspoof2019-LA",
+    "status": "completed",
+    "windows_analyzed": 6,
+    "processing_time_s": 0.45,
+    "results": [
+      {
+        "start_s": 0.0,
+        "end_s": 4.0,
+        "spoof_score": 0.1245
+      },
+      {
+        "start_s": 2.0,
+        "end_s": 6.0,
+        "spoof_score": 0.0982
+      }
+    ]
   },
   "speech": {
-    "available": false,
-    "model": null,
-    "status": "unavailable",
-    "segments": []
+    "available": true,
+    "model": "faster-whisper-base-int8",
+    "status": "completed",
+    "language": "en",
+    "processing_time_s": 0.38,
+    "segments": [
+      {
+        "start_s": 0.5,
+        "end_s": 3.2,
+        "text": "Hello, this is an authentic local voice sample."
+      }
+    ]
   }
 }
 ```

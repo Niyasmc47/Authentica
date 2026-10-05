@@ -34,23 +34,20 @@ def synthetic_video_path(temp_test_dir: Path) -> Path:
     Generates a small valid MP4 video for fast local testing.
     3 seconds long, 10 FPS, 320x240 resolution.
     """
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+    except Exception:
+        pass
+
     video_path = temp_test_dir / "test_synthetic.mp4"
-    width, height = 320, 240
-    fps = 10.0
-    duration_s = 3
-    total_frames = int(fps * duration_s)
-
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(video_path), fourcc, fps, (width, height))
-
-    for i in range(total_frames):
-        # Create varying colored synthetic frames
-        frame = np.zeros((height, width, 3), dtype=np.uint8)
-        color_val = int((i / total_frames) * 255)
-        frame[:, :] = (color_val, 100, 255 - color_val)
-        writer.write(frame)
-
-    writer.release()
+    cmd = [
+        "ffmpeg", "-v", "error", "-y",
+        "-f", "lavfi", "-i", "testsrc=duration=3:size=320x240:rate=10",
+        "-pix_fmt", "yuv420p",
+        str(video_path)
+    ]
+    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     return video_path
 
 
@@ -59,6 +56,12 @@ def synthetic_video_with_audio_path(temp_test_dir: Path, synthetic_video_path: P
     """
     Combines the synthetic video with a silent audio stream using ffmpeg.
     """
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+    except Exception:
+        pass
+
     output_path = temp_test_dir / "test_with_audio.mp4"
     
     cmd = [
@@ -78,5 +81,4 @@ def synthetic_video_with_audio_path(temp_test_dir: Path, synthetic_video_path: P
     if res.returncode == 0 and output_path.exists():
         return output_path
     
-    # Fallback to pure video if audio synthesis command encounters any issue
     return synthetic_video_path
