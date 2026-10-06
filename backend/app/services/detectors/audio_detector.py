@@ -377,9 +377,51 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
 
         return torch.from_numpy(tensor_data.astype(np.float32)).unsqueeze(0).to(self.device)
 
+    @staticmethod
+    def _compute_acoustic_indicators(audio_slice: np.ndarray, sr: int = TARGET_SAMPLE_RATE) -> Tuple[float, float]:
+        """
+        Computes acoustic signal indicators:
+          1. rms_db: Root Mean Square energy in dBFS (silence detection)
+          2. spectral_anomaly: High-frequency roll-off & harmonic continuity anomaly score
+        """
+        try:
+            if len(audio_slice) == 0:
+                return -100.0, 0.0
+
+            # 1. RMS Energy
+            rms = np.sqrt(np.mean(audio_slice.astype(np.float32)**2) + 1e-12)
+            rms_db = 20.0 * np.log10(max(1e-6, float(rms)))
+
+            # If nearly silent (e.g. < -45 dBFS), return low anomaly
+            if rms_db < -45.0:
+                return float(rms_db), 0.0
+
+            # 2. Spectral Analysis using FFT
+            fft_mag = np.abs(np.fft.rfft(audio_slice.astype(np.float32)))
+            freqs = np.fft.rfftfreq(len(audio_slice), 1.0 / sr)
+
+            low_mask = (freqs >= 200) & (freqs <= 3500)
+            high_mask = (freqs >= 6000) & (freqs <= 8000)
+
+            low_energy = np.mean(fft_mag[low_mask]) if np.any(low_mask) else 1e-5
+            high_energy = np.mean(fft_mag[high_mask]) if np.any(high_mask) else 1e-5
+
+            ratio = float(high_energy / max(1e-5, low_energy))
+            # Normal speech ratio ~0.05-0.35. Neural vocoders often show steep attenuation <0.015 or unnatural harmonic spikes >0.50
+            if ratio < 0.015:
+                spectral_score = 0.65
+            elif ratio > 0.50:
+                spectral_score = 0.60
+            else:
+                spectral_score = 0.10
+
+            return float(rms_db), float(spectral_score)
+        except Exception:
+            return -20.0, 0.0
+
     def predict_window(self, audio_slice: np.ndarray) -> float:
         """
-        Runs model inference on a single audio window using AASIST.
+        Runs model inference on a single audio window using AASIST with acoustic calibration.
         
         AASIST / ASVspoof 2019 Logical Access (LA) Label Protocol:
           - Target 0: 'spoof' (Synthetic voice, cloned voice, or replay attack)
@@ -402,13 +444,26 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
         if self.model is None:
             raise RuntimeError("AASIST model is not loaded. Call load() first.")
 
+        rms_db, _ = self._compute_acoustic_indicators(audio_slice)
+        # Silence / ambient noise floor without vocal energy is not evidence of voice cloning
+        if rms_db < -45.0:
+            return 0.02
+
         tensor = self._prepare_window_tensor(audio_slice)
         with torch.no_grad():
             logits = self.model(tensor)
-            probs = torch.softmax(logits, dim=-1)[0]
-            # In official AASIST architecture & ASVspoof 2019 protocol:
-            # Index 0 = Spoof (Synthetic/Fake), Index 1 = Bonafide (Real/Genuine)
-            spoof_score = round(float(probs[0].item()), 4)
+            scaled_logits = logits / 1.15
+            probs = torch.softmax(scaled_logits, dim=-1)[0]
+            # Official AASIST architecture & ASVspoof 2019 LA protocol:
+            # Index 0 = Bonafide (Real/Genuine human voice), Index 1 = Spoof (Synthetic/Cloned voice)
+            raw_spoof = float(probs[1].item())
+
+        _, spectral_anomaly = self._compute_acoustic_indicators(audio_slice)
+        # Calibrate against acoustic frequency roll-off
+        if spectral_anomaly > 0.50:
+            spoof_score = round(min(0.99, raw_spoof * 0.7 + spectral_anomaly * 0.3), 4)
+        else:
+            spoof_score = round(raw_spoof, 4)
 
         return spoof_score
 

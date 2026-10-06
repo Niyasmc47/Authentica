@@ -31,6 +31,7 @@ const elements = {
   viewIdle: document.getElementById('viewIdle'),
   viewMonitoringSafe: document.getElementById('viewMonitoringSafe'),
   viewThreatAlert: document.getElementById('viewThreatAlert'),
+  viewScanClean: document.getElementById('viewScanClean'),
   viewScanning: document.getElementById('viewScanning'),
   viewError: document.getElementById('viewError'),
 
@@ -43,7 +44,12 @@ const elements = {
   btnStopProtection: document.getElementById('btnStopProtection'),
 
   // Threat Alert controls
+  threatBadgeHeader: document.getElementById('threatBadgeHeader'),
   threatActionBanner: document.getElementById('threatActionBanner'),
+  badgeAiStatus: document.getElementById('badgeAiStatus'),
+  descAiStatus: document.getElementById('descAiStatus'),
+  badgeHarmStatus: document.getElementById('badgeHarmStatus'),
+  descHarmStatus: document.getElementById('descHarmStatus'),
   rowAudioRisk: document.getElementById('rowAudioRisk'),
   textAudioRisk: document.getElementById('textAudioRisk'),
   rowVideoRisk: document.getElementById('rowVideoRisk'),
@@ -52,6 +58,10 @@ const elements = {
   textFraudRisk: document.getElementById('textFraudRisk'),
   btnOpenThreatReport: document.getElementById('btnOpenThreatReport'),
   btnDismissThreat: document.getElementById('btnDismissThreat'),
+
+  // Clean Scan controls
+  btnOpenCleanReport: document.getElementById('btnOpenCleanReport'),
+  btnCleanScanAgain: document.getElementById('btnCleanScanAgain'),
 
   // Quick Scan controls
   countdownVal: document.getElementById('countdownVal'),
@@ -70,6 +80,7 @@ const elements = {
 
 let currentTab = null;
 let activeThreatSummary = null;
+let healthCheckInterval = null;
 
 // Initialization
 document.addEventListener('DOMContentLoaded', async () => {
@@ -78,6 +89,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
   await checkHealth();
   await syncStateWithServiceWorker();
+
+  // Periodically check backend health while popup is active
+  healthCheckInterval = setInterval(checkHealth, 3500);
+});
+
+window.addEventListener('unload', () => {
+  if (healthCheckInterval) clearInterval(healthCheckInterval);
 });
 
 // Broadcast listener from background service worker
@@ -106,8 +124,18 @@ function setupEventListeners() {
   elements.btnOpenThreatReport.addEventListener('click', handleOpenThreatReportClick);
   elements.btnDismissThreat.addEventListener('click', handleDismissThreatClick);
 
+  // Clean scan actions
+  elements.btnOpenCleanReport?.addEventListener('click', handleOpenThreatReportClick);
+  elements.btnCleanScanAgain?.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: MESSAGE_TYPES.RESET_STATE });
+    showView(elements.viewIdle);
+  });
+
   // Error
-  elements.btnResetView.addEventListener('click', () => showView(elements.viewIdle));
+  elements.btnResetView.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: MESSAGE_TYPES.RESET_STATE });
+    showView(elements.viewIdle);
+  });
 
   // Settings
   elements.btnSettingsToggle.addEventListener('click', () => {
@@ -203,7 +231,7 @@ function applyGlobalState(state) {
     elements.scanningTitle.textContent = 'Capturing Tab Media';
     elements.scanningDesc.textContent = 'Audio playback remains audible while capturing...';
     if (elements.countdownVal) {
-      elements.countdownVal.textContent = state.quickScan.secondsRemaining || 8;
+      elements.countdownVal.textContent = state.quickScan.secondsRemaining || 4;
     }
     showView(elements.viewScanning);
     return;
@@ -217,7 +245,13 @@ function applyGlobalState(state) {
   }
 
   if (state.quickScan && state.quickScan.state === POPUP_STATES.COMPLETED && state.quickScan.summary) {
-    renderThreatAlert(state.quickScan.summary);
+    const summary = state.quickScan.summary;
+    const isThreat = summary.action === 'STOP_AND_VERIFY' || summary.action === 'CAUTION' || summary.mediaVerdict === 'LIKELY_MANIPULATED' || summary.mediaVerdict === 'SUSPICIOUS' || summary.visualLevel === 'HIGH' || summary.audioLevel === 'HIGH' || summary.fraudLevel === 'HIGH';
+    if (isThreat) {
+      renderThreatAlert(summary);
+    } else {
+      renderScanClean(summary);
+    }
     return;
   }
 
@@ -245,6 +279,7 @@ function showView(targetView) {
     elements.viewIdle,
     elements.viewMonitoringSafe,
     elements.viewThreatAlert,
+    elements.viewScanClean,
     elements.viewScanning,
     elements.viewError,
   ].forEach((v) => {
@@ -259,7 +294,7 @@ function showView(targetView) {
 /**
  * Handles "Turn On Protection" click.
  */
-function handleEnableProtectionClick() {
+async function handleEnableProtectionClick() {
   if (!currentTab) return;
 
   chrome.runtime.sendMessage({
@@ -289,8 +324,10 @@ function handleStopProtectionClick() {
 /**
  * Handles single quick scan.
  */
-function handleStartQuickScanClick() {
+async function handleStartQuickScanClick() {
   if (!currentTab) return;
+
+  showView(elements.viewScanning);
 
   chrome.runtime.sendMessage({
     type: MESSAGE_TYPES.START_SCAN,
@@ -302,8 +339,6 @@ function handleStartQuickScanClick() {
   }, (response) => {
     if (chrome.runtime.lastError || (response && !response.ok)) {
       renderError(response?.error || 'Could not capture current tab.');
-    } else {
-      showView(elements.viewScanning);
     }
   });
 }
@@ -314,45 +349,132 @@ function handleCancelQuickScanClick() {
 }
 
 /**
- * Renders prominent Threat Detected warning card with specific risk breakdown.
+ * Renders prominent Threat Detected warning card with explicit AI-made & Harmful breakdown.
  */
 function renderThreatAlert(summary) {
   if (!summary) return;
   activeThreatSummary = summary;
 
-  // Action Banner
-  elements.threatActionBanner.textContent = summary.action || 'STOP AND VERIFY';
+  const action = summary.action || 'STOP AND VERIFY';
+  elements.threatActionBanner.textContent = action.replace(/_/g, ' ');
 
-  // Audio risk row
-  const hasAudioRisk = summary.audioIsSpoof || (summary.audioSpoofProb && summary.audioSpoofProb >= 0.50);
+  const isDeepfake = summary.visualIsDeepfake || summary.audioIsSpoof || summary.mediaVerdict === 'LIKELY_MANIPULATED';
+  const isSuspicious = !isDeepfake && (summary.visualIsSuspicious || summary.audioIsSuspicious || summary.mediaVerdict === 'SUSPICIOUS');
+  const isHarmful = summary.fraudLevel === 'HIGH' || summary.fraudLevel === 'CRITICAL' || Boolean(summary.requestedAction);
+  const isSuspiciousHarm = !isHarmful && summary.fraudLevel === 'MEDIUM';
+
+  // 1. AI Deepfake Dimension
+  if (isDeepfake) {
+    if (elements.badgeAiStatus) {
+      elements.badgeAiStatus.textContent = '🤖 AI DETECTED';
+      elements.badgeAiStatus.className = 'dimension-status status-fake';
+    }
+    if (elements.descAiStatus) {
+      if (summary.visualIsDeepfake && summary.audioIsSpoof) {
+        elements.descAiStatus.textContent = 'Multi-modal: Synthetic face and cloned voice detected.';
+      } else if (summary.visualIsDeepfake) {
+        elements.descAiStatus.textContent = 'Facial deepfake / manipulation artifacts detected in video frames.';
+      } else {
+        elements.descAiStatus.textContent = 'Synthetic neural voice cloner characteristics detected.';
+      }
+    }
+  } else if (isSuspicious) {
+    if (elements.badgeAiStatus) {
+      elements.badgeAiStatus.textContent = '🔍 SUSPICIOUS';
+      elements.badgeAiStatus.className = 'dimension-status status-warn';
+    }
+    if (elements.descAiStatus) {
+      elements.descAiStatus.textContent = 'Moderate anomalies observed; verification advised.';
+    }
+  } else {
+    if (elements.badgeAiStatus) {
+      elements.badgeAiStatus.textContent = '📷 AUTHENTIC';
+      elements.badgeAiStatus.className = 'dimension-status status-clean';
+    }
+    if (elements.descAiStatus) {
+      elements.descAiStatus.textContent = 'No strong synthetic alteration or face manipulation detected.';
+    }
+  }
+
+  // 2. Harm & Fraud Intent Dimension
+  if (isHarmful) {
+    if (elements.badgeHarmStatus) {
+      elements.badgeHarmStatus.textContent = '🚨 HARMFUL SCAM';
+      elements.badgeHarmStatus.className = 'dimension-status status-harm';
+    }
+    if (elements.descHarmStatus) {
+      if (summary.requestedAction) {
+        elements.descHarmStatus.textContent = `Coercive action directive flagged: ${summary.requestedAction.replace(/_/g, ' ')}`;
+      } else {
+        elements.descHarmStatus.textContent = 'Social engineering patterns (urgency, secrecy, authority claim) flagged.';
+      }
+    }
+  } else if (isSuspiciousHarm) {
+    if (elements.badgeHarmStatus) {
+      elements.badgeHarmStatus.textContent = '⚠️ SUSPICIOUS';
+      elements.badgeHarmStatus.className = 'dimension-status status-warn';
+    }
+    if (elements.descHarmStatus) {
+      elements.descHarmStatus.textContent = 'Mild urgency or financial keywords observed in transcript.';
+    }
+  } else {
+    if (elements.badgeHarmStatus) {
+      elements.badgeHarmStatus.textContent = '🛡️ HARMLESS';
+      elements.badgeHarmStatus.className = 'dimension-status status-clean';
+    }
+    if (elements.descHarmStatus) {
+      elements.descHarmStatus.textContent = 'No extortion, phishing, or financial extraction patterns found.';
+    }
+  }
+
+  // Header badge text
+  if (elements.threatBadgeHeader) {
+    if (action === 'STOP_AND_VERIFY' || action === 'STOP') {
+      elements.threatBadgeHeader.textContent = '🚨 CRITICAL RISK';
+    } else if (action === 'CAUTION') {
+      elements.threatBadgeHeader.textContent = '⚠️ CAUTION';
+    } else {
+      elements.threatBadgeHeader.textContent = '🔍 VERIFY SOURCE';
+    }
+  }
+
+  // Modality rows
+  const hasAudioRisk = summary.audioIsSpoof || (summary.audioLevel === 'HIGH' && summary.audioSpoofProb >= 0.70);
   if (hasAudioRisk) {
     elements.rowAudioRisk.classList.remove('hidden');
-    elements.textAudioRisk.textContent = `Audio synthetic voice spoof flagged (${Math.round((summary.audioSpoofProb || 0.85) * 100)}%)`;
+    elements.textAudioRisk.textContent = `Audio voice spoof flagged (${Math.round((summary.audioSpoofProb || 0.85) * 100)}%)`;
   } else {
     elements.rowAudioRisk.classList.add('hidden');
   }
 
-  // Video risk row
-  const hasVideoRisk = summary.visualIsDeepfake || (summary.visualManipulationProb && summary.visualManipulationProb >= 0.50) || summary.mediaVerdict === 'MANIPULATED';
+  const hasVideoRisk = summary.visualIsDeepfake || (summary.visualLevel === 'HIGH' && summary.visualManipulationProb >= 0.70) || summary.mediaVerdict === 'LIKELY_MANIPULATED';
   if (hasVideoRisk) {
     elements.rowVideoRisk.classList.remove('hidden');
-    elements.textVideoRisk.textContent = `Manipulated visual face frames flagged (${Math.round((summary.visualManipulationProb || 0.8) * 100)}%)`;
+    elements.textVideoRisk.textContent = `Manipulated visual frames flagged (${Math.round((summary.visualManipulationProb || 0.8) * 100)}%)`;
   } else {
     elements.rowVideoRisk.classList.add('hidden');
   }
 
-  // Fraud directive row
-  const hasFraudRisk = summary.requestedAction || summary.fraudLevel === 'HIGH' || summary.fraudLevel === 'CRITICAL';
+  const hasFraudRisk = isHarmful;
   if (hasFraudRisk) {
     elements.rowFraudRisk.classList.remove('hidden');
     elements.textFraudRisk.textContent = summary.requestedAction 
-      ? `High-risk directive flagged: ${summary.requestedAction}`
-      : `Social engineering fraud indicators detected (${summary.fraudLevel})`;
+      ? `Coercive action: ${summary.requestedAction.replace(/_/g, ' ')}`
+      : `Social engineering tactics detected (${summary.fraudLevel})`;
   } else {
     elements.rowFraudRisk.classList.add('hidden');
   }
 
   showView(elements.viewThreatAlert);
+}
+
+/**
+ * Renders Clean / Verified scan result.
+ */
+function renderScanClean(summary) {
+  if (!summary) return;
+  activeThreatSummary = summary;
+  showView(elements.viewScanClean);
 }
 
 /**
@@ -421,3 +543,4 @@ async function checkHealth() {
     elements.backendStatusLabel.style.color = '#ef4444';
   }
 }
+

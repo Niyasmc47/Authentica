@@ -33,7 +33,14 @@ async def lifespan(app: FastAPI):
         logger.info("Prerequisites check: FFmpeg and FFprobe detected on system PATH.")
 
     logger.info(f"Ephemeral media directory configured at: {settings.TEMP_DIR.resolve()}")
+    
+    # Initialize MongoDB Atlas / Database Service
+    from app.db import DatabaseService
+    await DatabaseService.connect()
+
     yield
+
+    await DatabaseService.disconnect()
     logger.info(f"Shutting down {settings.PROJECT_NAME}")
 
 

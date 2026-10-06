@@ -32,7 +32,7 @@ let state = {
   // Quick scan mode
   quickScan: {
     state: POPUP_STATES.IDLE,
-    secondsRemaining: 8,
+    secondsRemaining: 4,
     tabId: null,
     tabTitle: '',
     tabUrl: '',
@@ -175,7 +175,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 /**
  * Initiates continuous monitoring on the specified tab.
  */
-async function startMonitoringOnTab(tabId, tabTitle, tabUrl) {
+async function startMonitoringOnTab(tabId, tabTitle, tabUrl, preAcquiredStreamId = null) {
   if (!tabId) throw new Error('No active browser tab found.');
   if (isRestrictedUrl(tabUrl)) {
     throw new Error('Internal browser pages (chrome://) cannot be captured.');
@@ -193,7 +193,7 @@ async function startMonitoringOnTab(tabId, tabTitle, tabUrl) {
   saveStateToStorage();
   broadcastState();
 
-  const streamId = await acquireStreamId(tabId);
+  const streamId = preAcquiredStreamId || (await acquireStreamId(tabId));
   await ensureOffscreenDocument();
 
   chrome.runtime.sendMessage({
@@ -223,6 +223,11 @@ function handleMonitoringChunkResult({ summary, raw }) {
 
     setBadgeRisk();
 
+    // Trigger in-tab floating alert banner on the active web page
+    if (state.monitoredTabId) {
+      injectThreatOverlay(state.monitoredTabId, summary);
+    }
+
     // Trigger desktop notification
     if (chrome.notifications && chrome.notifications.create) {
       chrome.notifications.create({
@@ -246,23 +251,142 @@ function handleMonitoringChunkResult({ summary, raw }) {
 }
 
 /**
+ * Injects a floating on-screen warning toast directly into the active video page.
+ */
+async function injectThreatOverlay(tabId, summary) {
+  if (!tabId) return;
+  try {
+    if (!chrome.scripting || !chrome.scripting.executeScript) return;
+
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (threatData) => {
+        const existing = document.getElementById('authentica-threat-overlay');
+        if (existing) existing.remove();
+
+        const isDeepfake = threatData.visualIsDeepfake || threatData.audioIsSpoof || threatData.mediaVerdict === 'LIKELY_MANIPULATED';
+        const isSuspicious = !isDeepfake && (threatData.visualIsSuspicious || threatData.audioIsSuspicious || threatData.mediaVerdict === 'SUSPICIOUS');
+        const isHarmful = threatData.fraudLevel === 'HIGH' || Boolean(threatData.requestedAction);
+        const isSuspiciousHarm = !isHarmful && threatData.fraudLevel === 'MEDIUM';
+
+        let aiBadgeText = '📷 AUTHENTIC';
+        let aiBadgeColor = '#10b981';
+        if (isDeepfake) {
+          aiBadgeText = '⚠️ SYNTHETIC / FAKE';
+          aiBadgeColor = '#ef4444';
+        } else if (isSuspicious) {
+          aiBadgeText = '🔍 SUSPICIOUS';
+          aiBadgeColor = '#f59e0b';
+        }
+
+        let harmBadgeText = '🛡️ HARMLESS';
+        let harmBadgeColor = '#10b981';
+        if (isHarmful) {
+          harmBadgeText = '🚨 HARMFUL SCAM';
+          harmBadgeColor = '#ef4444';
+        } else if (isSuspiciousHarm) {
+          harmBadgeText = '⚠️ SUSPICIOUS INTENT';
+          harmBadgeColor = '#f59e0b';
+        }
+
+        const overlay = document.createElement('div');
+        overlay.id = 'authentica-threat-overlay';
+        overlay.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          z-index: 2147483647;
+          background: #0f172a;
+          color: #f8fafc;
+          border: 1px solid rgba(239, 68, 68, 0.5);
+          box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 20px rgba(239, 68, 68, 0.3);
+          border-radius: 12px;
+          padding: 16px 18px;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          font-size: 13px;
+          line-height: 1.4;
+          width: 320px;
+          box-sizing: border-box;
+          pointer-events: auto;
+          backdrop-filter: blur(8px);
+        `;
+
+        const actionText = threatData.action || 'VERIFY';
+        const actionColor = actionText === 'STOP_AND_VERIFY' ? '#ef4444' : (actionText === 'CAUTION' ? '#f59e0b' : '#38bdf8');
+
+        overlay.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+            <div style="display:flex; align-items:center; gap:6px; font-weight:800; font-size:11px; letter-spacing:0.06em; color:#ef4444;">
+              <span>🚨 AUTHENTICA SHIELD</span>
+            </div>
+            <button id="auth-close-overlay" style="background:transparent; border:none; color:#94a3b8; font-size:16px; cursor:pointer; padding:0 4px; line-height:1;">✕</button>
+          </div>
+          
+          <div style="font-weight:800; font-size:15px; color:${actionColor}; margin-bottom:10px; letter-spacing:-0.01em;">
+            ${actionText.replace(/_/g, ' ')}
+          </div>
+
+          <div style="background:rgba(0,0,0,0.4); border:1px solid #1e293b; border-radius:8px; padding:10px; margin-bottom:12px; display:flex; flex-direction:column; gap:6px; font-size:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="color:#94a3b8;">AI Deepfake Origin:</span>
+              <span style="font-weight:700; color:${aiBadgeColor}; font-size:11.5px;">
+                ${aiBadgeText}
+              </span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="color:#94a3b8;">Harm / Fraud Intent:</span>
+              <span style="font-weight:700; color:${harmBadgeColor}; font-size:11.5px;">
+                ${harmBadgeText}
+              </span>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:8px;">
+            <a href="${threatData.fullReportUrl}" target="_blank" style="flex:1; background:#06b6d4; color:#030712; text-decoration:none; padding:8px 12px; border-radius:6px; font-weight:700; font-size:11.5px; text-align:center; display:block; transition:background 0.2s;">
+              Inspect Evidence Matrix ↗
+            </a>
+          </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        document.getElementById('auth-close-overlay')?.addEventListener('click', () => {
+          overlay.remove();
+        });
+
+        // Auto remove after 14 seconds
+        setTimeout(() => {
+          if (document.body.contains(overlay)) {
+            overlay.style.opacity = '0';
+            overlay.style.transition = 'opacity 0.4s ease';
+            setTimeout(() => overlay.remove(), 400);
+          }
+        }, 14000);
+      },
+      args: [summary],
+    });
+  } catch (err) {
+    console.warn('[Service Worker] In-tab overlay injection error:', err);
+  }
+}
+
+/**
  * Determines whether a clip exhibits forensic deepfake or social engineering fraud risk.
  */
 function evaluateRisk(summary, raw) {
-  // 1. Backend action directive
+  if (!summary) return false;
+
+  // 1. High risk backend action directive
   if (summary.action === 'STOP_AND_VERIFY' || summary.action === 'CAUTION') return true;
 
-  // 2. Visual face manipulation
-  if (summary.mediaVerdict === 'MANIPULATED' || summary.mediaVerdict === 'LIKELY_MANIPULATED') return true;
-  if (summary.visualIsDeepfake || (summary.visualManipulationProb && summary.visualManipulationProb >= 0.50)) return true;
+  // 2. High confidence deepfake findings
+  if (summary.mediaVerdict === 'LIKELY_MANIPULATED') return true;
+  if (summary.visualIsDeepfake || (summary.visualLevel === 'HIGH' && summary.visualManipulationProb >= 0.70)) return true;
+  if (summary.audioIsSpoof || (summary.audioLevel === 'HIGH' && summary.audioSpoofProb >= 0.70)) return true;
 
-  // 3. Audio voice anti-spoofing
-  if (summary.audioIsSpoof || (summary.audioSpoofProb && summary.audioSpoofProb >= 0.50)) return true;
-
-  // 4. Fraud intent & social engineering
+  // 3. Fraud intent & social engineering
   if (summary.fraudLevel === 'HIGH' || summary.fraudLevel === 'CRITICAL') return true;
   if (summary.requestedAction) return true;
-  if (summary.fraudRiskScore && summary.fraudRiskScore >= 0.40) return true;
 
   return false;
 }
@@ -290,7 +414,7 @@ function stopMonitoring() {
 /**
  * Initiates single manual 8-second quick scan.
  */
-async function handleStartQuickScan({ tabId, tabTitle, tabUrl }) {
+async function handleStartQuickScan({ tabId, tabTitle, tabUrl, streamId: preAcquiredStreamId }) {
   if (!tabId) throw new Error('No active browser tab found.');
   if (isRestrictedUrl(tabUrl)) {
     throw new Error('Internal browser pages (chrome://) cannot be captured.');
@@ -298,7 +422,7 @@ async function handleStartQuickScan({ tabId, tabTitle, tabUrl }) {
 
   state.quickScan = {
     state: POPUP_STATES.CAPTURING,
-    secondsRemaining: 8,
+    secondsRemaining: 4,
     tabId,
     tabTitle: tabTitle || 'Current Tab',
     tabUrl: tabUrl || '',
@@ -310,7 +434,7 @@ async function handleStartQuickScan({ tabId, tabTitle, tabUrl }) {
   saveStateToStorage();
   broadcastState();
 
-  const streamId = await acquireStreamId(tabId);
+  const streamId = preAcquiredStreamId || (await acquireStreamId(tabId));
   await ensureOffscreenDocument();
 
   chrome.runtime.sendMessage({
@@ -334,7 +458,7 @@ function handleCancelQuickScan() {
 function resetQuickScanState() {
   state.quickScan = {
     state: POPUP_STATES.IDLE,
-    secondsRemaining: 8,
+    secondsRemaining: 4,
     tabId: null,
     tabTitle: '',
     tabUrl: '',
@@ -355,14 +479,26 @@ function setQuickScanError(msg) {
 }
 
 // Helpers
-async function acquireStreamId(tabId) {
-  try {
-    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
-    if (!streamId) throw new Error('Chrome did not return a valid stream ID.');
-    return streamId;
-  } catch (err) {
-    throw new Error('Failed to acquire tab capture permission.');
-  }
+function acquireStreamId(tabId) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (!chrome.tabCapture || typeof chrome.tabCapture.getMediaStreamId !== 'function') {
+        return reject(new Error('Tab capture API is not supported or permitted in this browser profile.'));
+      }
+
+      chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (streamId) => {
+        if (chrome.runtime.lastError) {
+          return reject(new Error(chrome.runtime.lastError.message || 'Failed to acquire tab capture stream ID.'));
+        }
+        if (!streamId) {
+          return reject(new Error('Chrome did not return a valid stream ID for this tab.'));
+        }
+        resolve(streamId);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
 }
 
 async function hasOffscreenDocument() {

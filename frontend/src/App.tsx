@@ -10,9 +10,9 @@ import { AwarenessPage } from './pages/AwarenessPage';
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
-      <div className="min-h-screen flex flex-col bg-cyber-950 text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200">
+      <div className="min-h-screen flex flex-col bg-canvas text-carbon selection:bg-mint selection:text-carbon font-sans">
         <Navbar />
-        <main className="flex-1">
+        <main className="flex-1 pb-16">
           <Routes>
             <Route path="/" element={<AnalyzePage />} />
             <Route path="/results/:id" element={<ResultsPage />} />

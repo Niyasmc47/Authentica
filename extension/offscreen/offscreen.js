@@ -61,8 +61,10 @@ async function handleStartSingleScan({ streamId, tabId, tabTitle, tabUrl }) {
     currentMediaStream = await acquireMediaStream(streamId);
     preserveTabAudio(currentMediaStream);
 
-    const mimeType = selectSupportedMimeType();
-    startSingleRecorder(mimeType);
+    const hasVideo = currentMediaStream.getVideoTracks().length > 0;
+    const hasAudio = currentMediaStream.getAudioTracks().length > 0;
+    const mimeType = selectSupportedMimeType(hasVideo, hasAudio);
+    startSingleRecorder(mimeType, hasVideo);
   } catch (err) {
     console.error('[Offscreen] Single scan capture failed:', err);
     cleanupResources();
@@ -94,8 +96,10 @@ async function handleStartMonitoring({ streamId, tabId, tabTitle, tabUrl }) {
       };
     }
 
-    const mimeType = selectSupportedMimeType();
-    startContinuousMonitoringLoop(mimeType);
+    const hasVideo = currentMediaStream.getVideoTracks().length > 0;
+    const hasAudio = currentMediaStream.getAudioTracks().length > 0;
+    const mimeType = selectSupportedMimeType(hasVideo, hasAudio);
+    startContinuousMonitoringLoop(mimeType, hasVideo);
   } catch (err) {
     console.error('[Offscreen] Continuous monitoring failed:', err);
     cleanupResources();
@@ -107,11 +111,16 @@ async function handleStartMonitoring({ streamId, tabId, tabTitle, tabUrl }) {
 }
 
 /**
- * Acquires tab stream with audio + video, falling back to video only if needed.
+ * Acquires tab stream with audio + video, falling back to video-only or audio-only if needed.
  */
 async function acquireMediaStream(streamId) {
+  if (!streamId) {
+    throw new Error('Capture stream ID is missing or invalid.');
+  }
+
+  // 1. Attempt full combined Audio + Video capture
   try {
-    return await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         mandatory: {
           chromeMediaSource: 'tab',
@@ -122,23 +131,48 @@ async function acquireMediaStream(streamId) {
         mandatory: {
           chromeMediaSource: 'tab',
           chromeMediaSourceId: streamId,
+          maxFrameRate: 30,
         },
       },
     });
-  } catch (audioErr) {
-    console.warn('[Offscreen] Combined video+audio capture failed, falling back to video:', audioErr);
-    try {
-      return await navigator.mediaDevices.getUserMedia({
-        video: {
-          mandatory: {
-            chromeMediaSource: 'tab',
-            chromeMediaSourceId: streamId,
-          },
+    console.info('[Offscreen] Successfully acquired tab Audio + Video stream.');
+    return stream;
+  } catch (audioVideoErr) {
+    console.warn('[Offscreen] Combined video+audio capture failed, trying video only:', audioVideoErr);
+  }
+
+  // 2. Fallback: Video only
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        mandatory: {
+          chromeMediaSource: 'tab',
+          chromeMediaSourceId: streamId,
+          maxFrameRate: 30,
         },
-      });
-    } catch (videoErr) {
-      throw new Error('Unable to capture tab media stream. The tab may be protected or empty.');
-    }
+      },
+    });
+    console.info('[Offscreen] Successfully acquired tab Video-only stream.');
+    return stream;
+  } catch (videoErr) {
+    console.warn('[Offscreen] Video-only capture failed, trying audio only:', videoErr);
+  }
+
+  // 3. Fallback: Audio only
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        mandatory: {
+          chromeMediaSource: 'tab',
+          chromeMediaSourceId: streamId,
+        },
+      },
+    });
+    console.info('[Offscreen] Successfully acquired tab Audio-only stream.');
+    return stream;
+  } catch (audioErr) {
+    console.error('[Offscreen] All tab capture modes failed:', audioErr);
+    throw new Error('Unable to capture tab media stream. Please ensure video or audio is playing on the tab.');
   }
 }
 
@@ -148,7 +182,7 @@ async function acquireMediaStream(streamId) {
 function preserveTabAudio(stream) {
   try {
     const audioTracks = stream.getAudioTracks();
-    if (audioTracks.length > 0) {
+    if (audioTracks && audioTracks.length > 0) {
       currentAudioContext = new AudioContext();
       currentAudioSource = currentAudioContext.createMediaStreamSource(stream);
       currentAudioSource.connect(currentAudioContext.destination);
@@ -160,33 +194,49 @@ function preserveTabAudio(stream) {
 }
 
 /**
- * Detects supported WebM MIME type.
+ * Detects supported WebM MIME type based on available tracks.
  */
-function selectSupportedMimeType() {
-  const candidates = [
-    'video/webm;codecs=vp8,opus',
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8',
-    'video/webm',
-  ];
+function selectSupportedMimeType(hasVideo = true, hasAudio = true) {
+  if (hasVideo) {
+    const videoCandidates = [
+      'video/webm;codecs=vp8,opus',
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8',
+      'video/webm',
+    ];
 
-  for (const candidate of candidates) {
-    if (MediaRecorder.isTypeSupported(candidate)) {
-      return candidate;
+    for (const candidate of videoCandidates) {
+      if (MediaRecorder.isTypeSupported(candidate)) {
+        return candidate;
+      }
     }
+    return 'video/webm';
+  } else {
+    const audioCandidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+    ];
+    for (const candidate of audioCandidates) {
+      if (MediaRecorder.isTypeSupported(candidate)) {
+        return candidate;
+      }
+    }
+    return 'audio/webm';
   }
-  return 'video/webm';
 }
 
 /**
- * Sets up and runs a single 8-second scan.
+ * Sets up and runs a single scan.
  */
-function startSingleRecorder(mimeType) {
+function startSingleRecorder(mimeType, hasVideo = true) {
   recordingChunks = [];
-  currentMediaRecorder = new MediaRecorder(currentMediaStream, {
-    mimeType,
-    videoBitsPerSecond: 2500000,
-  });
+  const options = { mimeType };
+  if (hasVideo) {
+    options.videoBitsPerSecond = 2500000;
+  }
+
+  currentMediaRecorder = new MediaRecorder(currentMediaStream, options);
 
   currentMediaRecorder.ondataavailable = (event) => {
     if (event.data && event.data.size > 0) {
@@ -195,7 +245,7 @@ function startSingleRecorder(mimeType) {
   };
 
   notifyState(POPUP_STATES.CAPTURING, {
-    secondsRemaining: 8,
+    secondsRemaining: Math.ceil(CAPTURE_DURATION_MS / 1000),
     tabTitle: currentTabMeta.tabTitle,
     tabUrl: currentTabMeta.tabUrl,
   });
@@ -270,17 +320,18 @@ async function finishSingleScan({ mimeType }) {
 }
 
 /**
- * Continuous monitoring loop: records consecutive 8s chunks and streams to backend.
+ * Continuous monitoring loop: records consecutive chunks and streams to backend.
  */
-function startContinuousMonitoringLoop(mimeType) {
+function startContinuousMonitoringLoop(mimeType, hasVideo = true) {
   if (!isMonitoringActive || !currentMediaStream) return;
 
   recordingChunks = [];
   try {
-    currentMediaRecorder = new MediaRecorder(currentMediaStream, {
-      mimeType,
-      videoBitsPerSecond: 2000000,
-    });
+    const options = { mimeType };
+    if (hasVideo) {
+      options.videoBitsPerSecond = 2000000;
+    }
+    currentMediaRecorder = new MediaRecorder(currentMediaStream, options);
   } catch (e) {
     console.error('[Offscreen] Failed to create MediaRecorder:', e);
     return;
@@ -311,7 +362,7 @@ function startContinuousMonitoringLoop(mimeType) {
 
     // Immediately start recording NEXT chunk if monitoring is still active!
     if (isMonitoringActive && currentMediaStream && currentMediaStream.active) {
-      startContinuousMonitoringLoop(mimeType);
+      startContinuousMonitoringLoop(mimeType, hasVideo);
     }
 
     // Process completed chunk asynchronously in background

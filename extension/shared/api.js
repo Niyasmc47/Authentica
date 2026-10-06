@@ -29,24 +29,33 @@ export async function getWebAppUrl() {
 }
 
 /**
- * Performs a fast health verification check against the backend.
+ * Performs a fast health verification check against the backend with fallback.
  */
 export async function checkBackendHealth(apiUrl) {
-  const target = apiUrl || (await getApiUrl());
-  try {
-    const res = await fetch(`${target}/api/health`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      signal: AbortSignal.timeout(4000),
-    });
-    if (!res.ok) {
-      return { ok: false, error: `Backend responded with HTTP ${res.status}` };
-    }
-    const data = await res.json();
-    return { ok: true, data };
-  } catch (err) {
-    return { ok: false, error: err.message || 'Cannot reach Authentica backend service' };
+  const primary = apiUrl || (await getApiUrl());
+  const candidates = [primary];
+  if (primary.includes('localhost')) {
+    candidates.push(primary.replace('localhost', '127.0.0.1'));
+  } else if (primary.includes('127.0.0.1')) {
+    candidates.push(primary.replace('127.0.0.1', 'localhost'));
   }
+
+  for (const target of candidates) {
+    try {
+      const res = await fetch(`${target}/api/health`, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(2500),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { ok: true, data, activeUrl: target };
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return { ok: false, error: 'Cannot reach Authentica backend service on port 8000' };
 }
 
 /**
@@ -58,7 +67,7 @@ export async function checkBackendHealth(apiUrl) {
  * @param {object} [metadata] - Optional tab metadata
  */
 export async function uploadClipForAnalysis(mediaBlob, filename, metadata = {}) {
-  const apiUrl = await getApiUrl();
+  let apiUrl = await getApiUrl();
   const webAppUrl = await getWebAppUrl();
 
   if (!mediaBlob || mediaBlob.size === 0) {
@@ -69,16 +78,36 @@ export async function uploadClipForAnalysis(mediaBlob, filename, metadata = {}) 
   const formData = new FormData();
   formData.append('file', mediaBlob, uploadName);
 
+  const candidates = [apiUrl];
+  if (apiUrl.includes('localhost')) {
+    candidates.push(apiUrl.replace('localhost', '127.0.0.1'));
+  } else if (apiUrl.includes('127.0.0.1')) {
+    candidates.push(apiUrl.replace('127.0.0.1', 'localhost'));
+  }
+
   let response;
-  try {
-    response = await fetch(`${apiUrl}/api/analyses`, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        'Accept': 'application/json',
-      },
-    });
-  } catch (err) {
+  let activeApiUrl = apiUrl;
+  let lastErr = null;
+
+  for (const target of candidates) {
+    try {
+      response = await fetch(`${target}/api/analyses`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+      if (response) {
+        activeApiUrl = target;
+        break;
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  if (!response) {
     throw new Error(`Analysis server unavailable at ${apiUrl}. Please verify the backend is running.`);
   }
 
@@ -104,18 +133,35 @@ export async function uploadClipForAnalysis(mediaBlob, filename, metadata = {}) 
 
   const data = await response.json();
 
+  const visualLevel = data.evidence?.visual?.level || 'N/A';
+  const audioLevel = data.evidence?.audio?.level || 'N/A';
+  const visualMean = data.evidence?.visual?.statistics?.mean_score || 0;
+  const audioMean = data.evidence?.audio?.statistics?.mean_score || 0;
+  const fraudLevel = data.assessment?.fraud || data.fraud?.level || 'LOW';
+  const action = data.assessment?.action || 'NO_ACTION_FLAGGED';
+  const mediaVerdict = data.assessment?.media || 'NO_STRONG_EVIDENCE';
+
+  const isVisualHigh = visualLevel === 'HIGH' || visualMean >= 0.72;
+  const isAudioHigh = audioLevel === 'HIGH' || audioMean >= 0.72;
+  const isVisualSuspect = visualLevel === 'MEDIUM' || (visualMean >= 0.50 && visualMean < 0.72);
+  const isAudioSuspect = audioLevel === 'MEDIUM' || (audioMean >= 0.50 && audioMean < 0.72);
+
   // Extract compact warning summary without altering backend verdicts
   const summary = {
     id: data.id,
     status: data.status,
-    action: data.assessment?.action || 'VERIFY',
-    mediaVerdict: data.assessment?.media || 'UNCERTAIN',
-    fraudLevel: data.assessment?.fraud || data.fraud?.level || 'LOW',
-    visualManipulationProb: data.visual?.manipulation_probability || 0,
-    visualIsDeepfake: Boolean(data.visual?.is_deepfake),
-    audioSpoofProb: data.audio?.spoof_probability || 0,
-    audioIsSpoof: Boolean(data.audio?.is_spoof),
-    fraudRiskScore: data.fraud?.risk_score || 0,
+    action,
+    mediaVerdict,
+    fraudLevel,
+    visualLevel,
+    audioLevel,
+    visualManipulationProb: visualMean,
+    visualIsDeepfake: isVisualHigh,
+    visualIsSuspicious: isVisualSuspect,
+    audioSpoofProb: audioMean,
+    audioIsSpoof: isAudioHigh,
+    audioIsSuspicious: isAudioSuspect,
+    fraudRiskScore: fraudLevel === 'HIGH' ? 0.9 : (fraudLevel === 'MEDIUM' ? 0.5 : 0.1),
     requestedAction: data.fraud?.requested_actions?.[0]?.action || null,
     explanations: Array.isArray(data.explanation) ? data.explanation.slice(0, 3) : [],
     fullReportUrl: `${webAppUrl}/results/${data.id}`,

@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import uuid
 from pathlib import Path
@@ -179,12 +180,10 @@ class AnalysisService:
                     results=[]
                 )
 
-                # Audio detector & Transcriber
-                audio_result = await self._run_audio_detector(
-                    analysis_id, audio_proc.audio_path, None
-                )
-                speech_result = await self._run_speech_transcriber(
-                    analysis_id, audio_proc.audio_path, None
+                # Audio detector & Transcriber in parallel
+                audio_result, speech_result = await asyncio.gather(
+                    self._run_audio_detector(analysis_id, audio_proc.audio_path, None),
+                    self._run_speech_transcriber(analysis_id, audio_proc.audio_path, None),
                 )
 
                 # Fraud Intent Engine
@@ -264,19 +263,11 @@ class AnalysisService:
                     audio_available=proc_result.audio_available,
                 )
 
-                # Invoke Visual Detector (Member 2)
-                visual_result = await self._run_visual_detector(
-                    analysis_id, proc_result.frame_samples, video_info
-                )
-
-                # Invoke Audio Detector (Member 3)
-                audio_result = await self._run_audio_detector(
-                    analysis_id, proc_result.audio_path, video_info
-                )
-
-                # Invoke Speech-to-Text (Member 3)
-                speech_result = await self._run_speech_transcriber(
-                    analysis_id, proc_result.audio_path, video_info
+                # Run all 3 sensory deepfake detectors concurrently in parallel
+                visual_result, audio_result, speech_result = await asyncio.gather(
+                    self._run_visual_detector(analysis_id, proc_result.frame_samples, video_info),
+                    self._run_audio_detector(analysis_id, proc_result.audio_path, video_info),
+                    self._run_speech_transcriber(analysis_id, proc_result.audio_path, video_info),
                 )
 
                 # Stage 3: Fraud Intent Engine

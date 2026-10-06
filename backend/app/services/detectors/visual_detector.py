@@ -214,9 +214,85 @@ class VisualDeepfakeDetector(VisualDetector):
         face_crop = img_rgb[y1:y2, x1:x2]
         return face_crop
 
+    @staticmethod
+    def _calculate_face_forensics(face_crop_rgb: np.ndarray) -> Tuple[float, float]:
+        """
+        Computes forensic quality and spatial-frequency anomaly indicators:
+          1. Sharpness / Focus Index (Laplacian variance normalized to [0, 1])
+          2. High-Frequency Spectral Artifact Score (2D FFT energy distribution)
+        """
+        try:
+            gray = cv2.cvtColor(face_crop_rgb, cv2.COLOR_RGB2GRAY)
+            # 1. Laplacian sharpness metric
+            lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+            sharpness = float(np.clip(lap_var / 150.0, 0.05, 1.0))
+
+            # 2. 2D FFT Frequency Analysis
+            # Synthetic generators and blending boundaries leave high-frequency grid & boundary artifacts
+            h, w = gray.shape
+            if h < 16 or w < 16:
+                return sharpness, 0.0
+
+            f = np.fft.fft2(gray.astype(np.float32))
+            fshift = np.fft.fftshift(f)
+            mag = np.log1p(np.abs(fshift))
+
+            cy, cx = h // 2, w // 2
+            r_inner = min(h, w) // 6
+            r_outer = min(h, w) // 2
+
+            y, x = np.ogrid[:h, :w]
+            dist = np.sqrt((x - cx)**2 + (y - cy)**2)
+
+            low_mask = dist <= r_inner
+            high_mask = (dist > r_inner) & (dist <= r_outer)
+
+            low_e = np.mean(mag[low_mask]) if np.any(low_mask) else 1.0
+            high_e = np.mean(mag[high_mask]) if np.any(high_mask) else 0.0
+
+            ratio = float(high_e / max(1e-5, low_e))
+            spectral_anomaly = float(np.clip((ratio - 0.40) * 1.5, 0.0, 1.0))
+            return sharpness, spectral_anomaly
+        except Exception:
+            return 1.0, 0.0
+
+    @classmethod
+    def _calibrate_crop_score(cls, raw_real: float, raw_fake: float, face_crop_rgb: np.ndarray) -> Tuple[float, float]:
+        """
+        Calibrates raw neural network logits against optical and spatial-frequency indicators.
+        Prevents low-resolution webcam compression and motion blur from generating false positives.
+        """
+        sharpness, spectral_anomaly = cls._calculate_face_forensics(face_crop_rgb)
+        h, w, _ = face_crop_rgb.shape
+        min_dim = min(h, w)
+
+        fake_score = raw_fake
+
+        # 1. Webcam Compression & Low-Resolution Gating:
+        # If crop is small (<120px) or low sharpness without strong AI spectral anomaly,
+        # damp compression noise towards genuine baseline
+        if min_dim < 120 or sharpness < 0.40:
+            quality_factor = min(1.0, max(0.2, (min_dim / 120.0) * (sharpness / 0.40)))
+            if spectral_anomaly < 0.35:
+                # Natural camera compression: pull towards genuine baseline
+                fake_score = fake_score * (0.35 + 0.65 * quality_factor)
+            else:
+                # High spectral anomaly: retain AI generation artifact score
+                fake_score = fake_score * 0.85 + spectral_anomaly * 0.15
+
+        # 2. Clean Camera Optics:
+        # High sharpness with minimal spectral anomaly indicates authentic camera feed
+        if sharpness > 0.60 and spectral_anomaly < 0.10:
+            fake_score = min(fake_score, fake_score * 0.85)
+
+        fake_score = float(np.clip(fake_score, 0.01, 0.99))
+        fake_score = round(fake_score, 4)
+        real_score = round(1.0 - fake_score, 4)
+        return real_score, fake_score
+
     def predict_face_crop(self, face_crop_rgb: np.ndarray) -> Tuple[float, float]:
         """
-        Runs model inference on a single RGB face crop.
+        Runs model inference on a single RGB face crop with quality-aware calibration.
         Returns: (real_score, fake_score)
         """
         if self.model is None:
@@ -226,15 +302,16 @@ class VisualDeepfakeDetector(VisualDetector):
 
         with torch.no_grad():
             logits = self.model(tensor)
-            probs = torch.softmax(logits, dim=-1)[0]
-            real_score = round(float(probs[0].item()), 4)
-            fake_score = round(float(probs[1].item()), 4)
+            scaled_logits = logits / 1.2
+            probs = torch.softmax(scaled_logits, dim=-1)[0]
+            raw_real = float(probs[0].item())
+            raw_fake = float(probs[1].item())
 
-        return real_score, fake_score
+        return self._calibrate_crop_score(raw_real, raw_fake, face_crop_rgb)
 
     def predict_batch(self, face_crops_rgb: List[np.ndarray]) -> List[Tuple[float, float]]:
         """
-        Runs batched model inference on a list of RGB face crops.
+        Runs batched model inference on a list of RGB face crops with quality-aware calibration.
         Returns: List of (real_score, fake_score)
         """
         if not face_crops_rgb:
@@ -248,11 +325,16 @@ class VisualDeepfakeDetector(VisualDetector):
 
         with torch.no_grad():
             logits = self.model(batch_tensor)
-            probs = torch.softmax(logits, dim=-1)
-            results = [
-                (round(float(p[0].item()), 4), round(float(p[1].item()), 4))
+            scaled_logits = logits / 1.2
+            probs = torch.softmax(scaled_logits, dim=-1)
+            raw_scores = [
+                (float(p[0].item()), float(p[1].item()))
                 for p in probs
             ]
+
+        results: List[Tuple[float, float]] = []
+        for crop, (raw_real, raw_fake) in zip(face_crops_rgb, raw_scores):
+            results.append(self._calibrate_crop_score(raw_real, raw_fake, crop))
 
         return results
 

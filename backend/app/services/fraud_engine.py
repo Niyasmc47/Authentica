@@ -102,7 +102,8 @@ class FraudIntentEngine:
         r"\b(?:in\s+this\s+(?:report|video|news|segment|story|documentary)|news\s+anchor|reporting\s+live)\b",
         r"\b(?:cybersecurity\s+tip|safety\s+warning|fraud\s+awareness|psa|public\s+service\s+announcement)\b",
         r"\b(?:police\s+warn(?:ed)?|officials\s+caution|fbi\s+warns|victims\s+were\s+targeted|how\s+scams?\s+work|scam\s+alert)\b",
-        r"\b(?:video\s+is\s+about\s+how\s+scammers|discussing\s+how\s+scammers)\b",
+        r"\b(?:video\s+is\s+about\s+how\s+scammers|discussing\s+how\s+scammers|educational\s+purposes\s+only|demonstration\s+of\s+a\s+scam)\b",
+        r"\b(?:awareness\s+campaign|warning\s+(?:the\s+public|viewers|citizens)|fraud\s+investigation\s+report)\b",
     ]
 
     def analyze(self, speech_result: Optional[SpeechResult]) -> FraudResult:

@@ -5,8 +5,8 @@
 export const DEFAULT_API_URL = 'http://localhost:8000';
 export const DEFAULT_WEB_APP_URL = 'http://localhost:3000';
 
-// Fixed capture duration for hackathon MVP (8.0 seconds)
-export const CAPTURE_DURATION_MS = 8000;
+// Fixed capture duration (4.0 seconds for fast real-time responsiveness)
+export const CAPTURE_DURATION_MS = 4000;
 
 export const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
 

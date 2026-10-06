@@ -4,36 +4,33 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
-  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        cyber: {
-          950: '#060911',
-          900: '#0a0f1d',
-          850: '#0f172a',
-          800: '#1e293b',
-          700: '#334155',
-          cyan: '#06b6d4',
-          emerald: '#10b981',
-          amber: '#f59e0b',
-          rose: '#f43f5e',
-          violet: '#8b5cf6',
-        }
+        carbon: '#000000',
+        paper: '#ffffff',
+        canvas: '#e5e5e5',
+        mist: '#f3f3f3',
+        ash: '#c6c6c6',
+        smoke: '#979797',
+        slate: '#444444',
+        graphite: '#2f2f2f',
+        mint: '#d1ffca',
+        voltage: '#fff100',
       },
       fontFamily: {
+        display: ['"Barlow Condensed"', 'Anton', '"Bebas Neue"', 'Impact', 'sans-serif'],
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+        mono: ['"JetBrains Mono"', '"IBM Plex Mono"', 'monospace'],
       },
-      animation: {
-        'pulse-subtle': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'scan': 'scan 2.5s ease-in-out infinite',
+      borderRadius: {
+        'card': '24px',
+        'card-lg': '32px',
+        'card-xl': '48px',
+        'pill': '9999px',
       },
-      keyframes: {
-        scan: {
-          '0%, 100%': { transform: 'translateY(0%)' },
-          '50%': { transform: 'translateY(100%)' },
-        }
+      boxShadow: {
+        'none': 'none',
       }
     },
   },

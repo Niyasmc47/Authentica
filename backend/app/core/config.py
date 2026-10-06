@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import List, Set
+from typing import List, Optional, Set
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
@@ -67,6 +67,10 @@ class Settings(BaseSettings):
         "Adobe", "Truepic", "BBC", "Sony", "Nikon", "Leica", "Microsoft", "C2PA Test Signer"
     ]
     
+    # MongoDB Atlas Database
+    MONGODB_URI: Optional[str] = None
+    MONGODB_DB_NAME: str = "authentica"
+
     # Temporary workspace root directory
     TEMP_DIR: Path = Path(__file__).resolve().parent.parent.parent / "temp"
     

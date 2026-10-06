@@ -1,30 +1,42 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
-  History as HistoryIcon, 
   Trash2, 
   FileVideo, 
-  Music,
+  Music, 
   ArrowRight, 
-  ShieldAlert, 
-  ShieldCheck, 
-  AlertTriangle, 
-  Clock, 
-  Search,
-  Flame,
-  Plus
+  Search, 
+  Plus,
+  ShieldCheck
 } from 'lucide-react';
 import { HistoryItem } from '../types/analysis';
-import { getHistory, clearHistory } from '../services/api';
+import { getHistory, clearHistory, fetchAnalysisHistory } from '../services/api';
 
 export const HistoryPage: React.FC = () => {
   const navigate = useNavigate();
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [isMongoConnected, setIsMongoConnected] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    setHistoryItems(getHistory());
-  }, []);
+    let isMounted = true;
+    setLoading(true);
+    fetchAnalysisHistory(searchTerm)
+      .then(({ items, mongodb_connected }) => {
+        if (isMounted) {
+          setHistoryItems(items);
+          setIsMongoConnected(mongodb_connected);
+        }
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [searchTerm]);
 
   const handleClear = () => {
     if (window.confirm('Are you sure you want to clear your local analysis history?')) {
@@ -33,43 +45,43 @@ export const HistoryPage: React.FC = () => {
     }
   };
 
-  const filteredItems = historyItems.filter((item) =>
-    item.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.sha256.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (item.media_type && item.media_type.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredItems = historyItems;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 space-y-8 sm:space-y-10">
       
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-slate-800">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center space-x-3">
-            <HistoryIcon className="w-7 h-7 text-cyan-400" />
-            <span>Analysis History</span>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-ash/80">
+        <div className="space-y-1">
+          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-pill bg-paper border border-ash text-carbon text-xs font-mono font-bold uppercase tracking-wider mb-2">
+            <span className={`w-2 h-2 rounded-full ${isMongoConnected ? 'bg-mint' : 'bg-smoke'}`} />
+            <span>{isMongoConnected ? 'MONGODB ATLAS CLOUD SYNCED' : 'LOCAL CACHE SYNC'}</span>
+          </div>
+          <h1 className="font-display text-4xl sm:text-5xl font-black uppercase tracking-tight text-carbon">
+            ANALYSIS HISTORY
           </h1>
-          <p className="mt-1 text-xs sm:text-sm text-slate-400">
-            Locally cached forensic reports from your recent video &amp; audio analyses.
+          <p className="text-xs sm:text-sm font-mono text-slate">
+            {isMongoConnected
+              ? 'Synchronized with MongoDB Atlas forensic repository and active learning dataset.'
+              : 'Locally stored forensic reports from recent media verification sessions.'}
           </p>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2.5">
           {historyItems.length > 0 && (
             <button
               type="button"
               onClick={handleClear}
-              className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-rose-900 text-slate-400 hover:text-rose-400 text-xs font-mono flex items-center space-x-1.5 transition-colors"
+              className="editorial-btn-secondary flex items-center space-x-1.5 font-mono text-xs uppercase"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>Clear History</span>
+              <span>Clear Cache</span>
             </button>
           )}
 
           <Link
             to="/"
-            className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center space-x-1.5 transition-colors"
+            className="editorial-btn-primary flex items-center space-x-1.5 font-mono text-xs uppercase"
           >
             <Plus className="w-4 h-4" />
             <span>New Analysis</span>
@@ -77,111 +89,85 @@ export const HistoryPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Search & Filter */}
+      {/* Search Bar */}
       {historyItems.length > 0 && (
         <div className="relative max-w-md">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-smoke absolute left-4 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search by filename, SHA-256 or verdict..."
+            placeholder="Search by filename, hash or verdict..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-900/80 border border-slate-800 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-sans"
+            className="w-full pl-11 pr-4 py-2.5 rounded-pill bg-paper border border-ash text-xs font-mono text-carbon placeholder:text-smoke focus:outline-none focus:border-carbon transition-colors"
           />
         </div>
       )}
 
       {/* History List */}
       {filteredItems.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4">
+        <div className="grid grid-cols-1 gap-3.5">
           {filteredItems.map((item) => {
-            const isHigh = item.action === 'STOP_AND_VERIFY' || item.fraud_level === 'HIGH' || item.media_verdict === 'LIKELY_MANIPULATED';
-            const isMedium = item.action === 'VERIFY' || item.media_verdict === 'SUSPICIOUS';
             const isAudioItem = item.media_type === 'AUDIO';
 
             return (
               <div
                 key={item.id}
                 onClick={() => navigate(`/results/${item.id}`, { state: { analysis: item.analysis } })}
-                className="glass-panel p-5 rounded-2xl border border-slate-800 hover:border-slate-700 transition-all cursor-pointer group flex flex-col md:flex-row md:items-center justify-between gap-4"
+                className="editorial-card p-5 bg-paper hover:border-carbon transition-all cursor-pointer group flex flex-col md:flex-row md:items-center justify-between gap-4"
               >
                 {/* File info */}
-                <div className="flex items-start space-x-4">
-                  <div className={`p-3 rounded-xl border shrink-0 ${
-                    isHigh ? 'bg-rose-950/60 border-rose-900 text-rose-400' :
-                    isMedium ? 'bg-amber-950/60 border-amber-900 text-amber-400' :
-                    'bg-slate-900 border-slate-800 text-cyan-400'
-                  }`}>
-                    {isAudioItem ? (
-                      <Music className="w-6 h-6 text-purple-400" />
-                    ) : (
-                      <FileVideo className="w-6 h-6 text-cyan-400" />
-                    )}
+                <div className="flex items-start space-x-4 truncate">
+                  <div className="p-3 rounded-xl bg-mist border border-ash text-carbon shrink-0 group-hover:border-carbon transition-colors">
+                    {isAudioItem ? <Music className="w-5 h-5" /> : <FileVideo className="w-5 h-5" />}
                   </div>
-                  <div>
+                  <div className="truncate">
                     <div className="flex items-center space-x-2">
-                      <h3 className="text-base font-bold text-slate-200 group-hover:text-cyan-300 transition-colors">
+                      <h3 className="text-sm font-bold text-carbon font-mono group-hover:underline truncate">
                         {item.filename}
                       </h3>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                        isAudioItem ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
-                      }`}>
+                      <span className="editorial-pill-tag bg-mint text-carbon border border-carbon/20 text-[10px]">
                         {item.media_type || 'VIDEO'}
                       </span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 mt-1 text-xs font-mono text-slate-400">
+                    <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] font-mono text-slate">
                       <span>{item.duration_s.toFixed(1)}s</span>
                       <span>·</span>
-                      <span>SHA-256: {item.sha256.slice(0, 12)}...</span>
+                      <span>SHA-256: {item.sha256.slice(0, 10)}...</span>
                       <span>·</span>
                       <span>{new Date(item.created_at).toLocaleDateString()} {new Date(item.created_at).toLocaleTimeString()}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Badges & Jump */}
-                <div className="flex flex-wrap items-center gap-3">
+                {/* Badges & Action */}
+                <div className="flex flex-wrap items-center gap-3 shrink-0">
                   
-                  {/* Media verdict */}
-                  <div className="text-right">
-                    <span className="text-[10px] block font-mono text-slate-500 uppercase">Media Risk</span>
-                    <span className={`px-2.5 py-0.5 rounded text-xs font-mono font-bold ${
-                      item.media_verdict === 'LIKELY_MANIPULATED' ? 'bg-rose-950 text-rose-400 border border-rose-800' :
-                      item.media_verdict === 'SUSPICIOUS' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
-                      'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                    }`}>
+                  {/* Media risk badge */}
+                  <div className="text-right font-mono">
+                    <span className="text-[10px] block text-smoke uppercase">Media Risk</span>
+                    <span className="editorial-pill-tag bg-mist border border-ash text-carbon text-[10px]">
                       {item.media_verdict}
                     </span>
                   </div>
 
-                  {/* Fraud risk */}
-                  <div className="text-right">
-                    <span className="text-[10px] block font-mono text-slate-500 uppercase">Fraud Risk</span>
-                    <span className={`px-2.5 py-0.5 rounded text-xs font-mono font-bold ${
-                      item.fraud_level === 'HIGH' ? 'bg-rose-950 text-rose-400 border border-rose-800' :
-                      item.fraud_level === 'MEDIUM' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
-                      item.fraud_level === 'LOW' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
-                      'bg-slate-800 text-slate-400'
-                    }`}>
+                  {/* Fraud risk badge */}
+                  <div className="text-right font-mono">
+                    <span className="text-[10px] block text-smoke uppercase">Fraud Risk</span>
+                    <span className="editorial-pill-tag bg-mist border border-ash text-carbon text-[10px]">
                       {item.fraud_level}
                     </span>
                   </div>
 
-                  {/* Action recommendation */}
-                  <div className="text-right">
-                    <span className="text-[10px] block font-mono text-slate-500 uppercase">Action</span>
-                    <span className={`px-2.5 py-0.5 rounded text-xs font-mono font-bold ${
-                      item.action === 'STOP_AND_VERIFY' ? 'bg-rose-600 text-white shadow-[0_0_10px_rgba(244,63,94,0.3)]' :
-                      item.action === 'CAUTION' ? 'bg-cyan-600 text-slate-950' :
-                      item.action === 'VERIFY' ? 'bg-amber-600 text-white' :
-                      'bg-emerald-600 text-white'
-                    }`}>
+                  {/* Action */}
+                  <div className="text-right font-mono">
+                    <span className="text-[10px] block text-smoke uppercase">Action</span>
+                    <span className="editorial-pill-tag bg-carbon text-paper border border-carbon text-[10px]">
                       {item.action}
                     </span>
                   </div>
 
-                  <div className="p-2 rounded-xl bg-slate-900 border border-slate-800 group-hover:bg-cyan-500 group-hover:text-slate-950 transition-all text-slate-400 ml-2">
-                    <ArrowRight className="w-4 h-4" />
+                  <div className="p-2 rounded-lg bg-mist border border-ash text-carbon group-hover:bg-carbon group-hover:text-paper transition-all ml-1">
+                    <ArrowRight className="w-3.5 h-3.5" />
                   </div>
 
                 </div>
@@ -190,21 +176,25 @@ export const HistoryPage: React.FC = () => {
           })}
         </div>
       ) : (
-        <div className="p-12 text-center rounded-2xl glass-panel border border-slate-800">
-          <div className="w-14 h-14 mx-auto rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mb-4">
-            <HistoryIcon className="w-7 h-7" />
+        <div className="editorial-card-lg p-12 bg-paper text-center space-y-4">
+          <div className="w-12 h-12 mx-auto rounded-full bg-mist border border-ash flex items-center justify-center text-carbon">
+            <ShieldCheck className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-bold text-white">No Analysis History Yet</h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Uploaded videos are processed locally and their forensic summaries will be saved in your browser history.
+          <h3 className="font-display text-2xl font-black uppercase tracking-tight text-carbon">
+            NO SESSION HISTORY
+          </h3>
+          <p className="text-xs font-mono text-slate max-w-sm mx-auto">
+            Media analyzed in your browser session is cached locally. Analyze media to view forensic reports here.
           </p>
-          <Link
-            to="/"
-            className="mt-5 inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition-colors"
-          >
-            <span>Analyze Your First Media</span>
-            <ArrowRight className="w-4 h-4" />
-          </Link>
+          <div className="pt-2">
+            <Link
+              to="/"
+              className="editorial-btn-primary inline-flex items-center space-x-2 font-mono text-xs uppercase"
+            >
+              <span>Analyze Media Now</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
         </div>
       )}
 
