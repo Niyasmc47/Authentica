@@ -31,7 +31,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { AnalysisResponse, TimelineEvent, FraudRequestedAction, FraudCategoryEvidence } from '../types/analysis';
-import { getAnalysisById } from '../services/api';
+import { getAnalysisById, fetchAnalysisById } from '../services/api';
 
 export const ResultsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -50,6 +50,13 @@ export const ResultsPage: React.FC = () => {
     return null;
   });
 
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    if (location.state && location.state.analysis) return false;
+    if (id && getAnalysisById(id)) return false;
+    return !!id;
+  });
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [copiedHash, setCopiedHash] = useState<boolean>(false);
   const [selectedTimelineEvent, setSelectedTimelineEvent] = useState<TimelineEvent | null>(null);
   const [activePlaybackTime, setActivePlaybackTime] = useState<number>(0);
@@ -60,7 +67,27 @@ export const ResultsPage: React.FC = () => {
       const stored = getAnalysisById(id);
       if (stored) {
         setAnalysis(stored);
+        setIsLoading(false);
+      } else {
+        setIsLoading(true);
+        setLoadError(null);
+        fetchAnalysisById(id)
+          .then(fetched => {
+            if (fetched) {
+              setAnalysis(fetched);
+            } else {
+              setLoadError("The forensic analysis report was not found on the server or in local session cache.");
+            }
+          })
+          .catch(err => {
+            setLoadError(err?.message || "Failed to load forensic analysis.");
+          })
+          .finally(() => {
+            setIsLoading(false);
+          });
       }
+    } else {
+      setIsLoading(false);
     }
   }, [id, analysis]);
 
@@ -82,6 +109,20 @@ export const ResultsPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [isPlaying, analysis]);
 
+  if (isLoading) {
+    return (
+      <div className="min-h-[calc(100vh-140px)] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-cyan-950/40 border border-cyan-800/60 flex items-center justify-center text-cyan-400 mb-4 animate-pulse">
+          <Sparkles className="w-8 h-8 animate-spin" />
+        </div>
+        <h2 className="text-xl font-bold text-white">Loading Forensic Analysis...</h2>
+        <p className="text-sm text-slate-400 mt-2 max-w-md">
+          Retrieving multi-modal verification report from Authentica backend engine.
+        </p>
+      </div>
+    );
+  }
+
   if (!analysis) {
     return (
       <div className="min-h-[calc(100vh-140px)] flex flex-col items-center justify-center p-6 text-center">
@@ -90,15 +131,31 @@ export const ResultsPage: React.FC = () => {
         </div>
         <h2 className="text-xl font-bold text-white">Analysis Not Found</h2>
         <p className="text-sm text-slate-400 mt-1 max-w-md">
-          The requested analysis session ID is not in local memory or was cleared.
+          {loadError || "The requested analysis session ID is not in local memory or was cleared."}
         </p>
-        <Link
-          to="/"
-          className="mt-6 px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-sm flex items-center space-x-2 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Upload New Media</span>
-        </Link>
+        <div className="flex items-center gap-3 mt-6">
+          {id && (
+            <button
+              onClick={() => {
+                setIsLoading(true);
+                fetchAnalysisById(id).then(fetched => {
+                  if (fetched) setAnalysis(fetched);
+                  setIsLoading(false);
+                });
+              }}
+              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm transition-colors"
+            >
+              Retry Connection
+            </button>
+          )}
+          <Link
+            to="/"
+            className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-sm flex items-center space-x-2 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Upload New Media</span>
+          </Link>
+        </div>
       </div>
     );
   }

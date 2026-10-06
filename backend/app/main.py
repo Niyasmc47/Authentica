@@ -2,6 +2,7 @@ import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,6 +57,12 @@ app.add_middleware(
 
 # Mount API routes under /api
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Mount controlled demo lab under /demo for browser extension testing
+demo_dir = Path(__file__).resolve().parent.parent.parent / "demo"
+if demo_dir.is_dir():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/demo", StaticFiles(directory=str(demo_dir), html=True), name="demo")
 
 
 # Global unhandled exception handler to prevent leaking stack traces to clients

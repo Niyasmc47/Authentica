@@ -184,3 +184,30 @@ def test_post_analyses_with_audio_end_to_end(test_client: TestClient, synthetic_
     assert isinstance(data["timeline"], list)
     assert isinstance(data["explanation"], list)
     assert isinstance(data["limitations"], list)
+
+
+def test_get_analysis_by_id_and_not_found(test_client: TestClient, synthetic_video_path: Path):
+    """
+    Verifies that a completed analysis is retrievable via GET /api/analyses/{id},
+    and that querying an unknown ID returns HTTP 404.
+    """
+    # 1. Upload video
+    with open(synthetic_video_path, "rb") as video_file:
+        post_res = test_client.post(
+            "/api/analyses",
+            files={"file": (synthetic_video_path.name, video_file, "video/mp4")}
+        )
+    assert post_res.status_code == 200
+    created_id = post_res.json()["id"]
+
+    # 2. Query by ID
+    get_res = test_client.get(f"/api/analyses/{created_id}")
+    assert get_res.status_code == 200
+    retrieved = get_res.json()
+    assert retrieved["id"] == created_id
+    assert retrieved["status"] == "completed"
+    assert "assessment" in retrieved
+
+    # 3. Non-existent ID returns 404
+    missing_res = test_client.get("/api/analyses/00000000-0000-0000-0000-000000000000")
+    assert missing_res.status_code == 404

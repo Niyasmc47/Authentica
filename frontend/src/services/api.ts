@@ -95,6 +95,34 @@ export function getAnalysisById(id: string): AnalysisResponse | null {
   return found ? found.analysis : null;
 }
 
+export async function fetchAnalysisById(id: string): Promise<AnalysisResponse | null> {
+  // First attempt via relative /api path (Vite proxy)
+  try {
+    const res = await fetch(`${API_BASE}/analyses/${id}`);
+    if (res.ok) {
+      const data: AnalysisResponse = await res.json();
+      saveToHistory(data);
+      return data;
+    }
+  } catch (e) {
+    console.warn(`Vite proxy fetch for analysis ${id} failed:`, e);
+  }
+
+  // Fallback direct backend call to port 8000
+  try {
+    const directRes = await fetch(`http://localhost:8000/api/analyses/${id}`);
+    if (directRes.ok) {
+      const data: AnalysisResponse = await directRes.json();
+      saveToHistory(data);
+      return data;
+    }
+  } catch (e) {
+    console.warn(`Direct backend fetch for analysis ${id} failed:`, e);
+  }
+
+  return null;
+}
+
 export function clearHistory(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);
