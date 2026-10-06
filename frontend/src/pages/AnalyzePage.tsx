@@ -14,6 +14,7 @@ import {
   Cpu
 } from 'lucide-react';
 import { analyzeVideo, ApiError } from '../services/api';
+import { ExtensionModal } from '../components/ExtensionModal';
 
 const MAX_FILE_SIZE_MB = 100;
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.avi', '.webm', '.mkv'];
@@ -50,6 +51,7 @@ export const AnalyzePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
+  const [isExtensionModalOpen, setIsExtensionModalOpen] = useState<boolean>(false);
 
   const isAudioFile = selectedFile 
     ? AUDIO_EXTENSIONS.some(ext => selectedFile.name.toLowerCase().endsWith(ext)) || selectedFile.type.startsWith('audio/')
@@ -365,7 +367,30 @@ export const AnalyzePage: React.FC = () => {
 
       </div>
 
-      {/* 2. Inverted Solid Black Architecture Block */}
+      {/* 2. Chrome Extension Callout Banner */}
+      <div className="editorial-card p-6 sm:p-8 bg-paper border border-ash flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="space-y-2 text-center md:text-left">
+          <div className="inline-flex items-center space-x-2 px-3 py-0.5 rounded-pill bg-mist border border-ash text-carbon text-xs font-mono font-bold uppercase">
+            <span>REAL-TIME BROWSER PROTECTION</span>
+          </div>
+          <h3 className="font-display text-2xl sm:text-3xl font-black uppercase tracking-tight text-carbon">
+            Authentica Chrome Extension
+          </h3>
+          <p className="text-xs sm:text-sm text-slate max-w-xl font-sans leading-relaxed">
+            Scan live Google Meet sessions, video calls, and web audio with 1-click active tab forensic capture.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsExtensionModalOpen(true)}
+          className="editorial-btn-primary flex items-center space-x-2 shrink-0 font-mono text-xs uppercase px-6 py-3.5"
+        >
+          <span>Get Chrome Extension</span>
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* 3. Inverted Solid Black Architecture Block */}
       <div className="editorial-inverted-card p-8 sm:p-12 space-y-8">
         
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-graphite">
@@ -417,6 +442,12 @@ export const AnalyzePage: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Extension Modal */}
+      <ExtensionModal
+        isOpen={isExtensionModalOpen}
+        onClose={() => setIsExtensionModalOpen(false)}
+      />
 
     </div>
   );
