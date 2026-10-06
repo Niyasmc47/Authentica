@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
+import subprocess
 import cv2
 
 from app.core.config import settings
@@ -131,22 +132,34 @@ class VideoProcessor:
             if ffprobe_duration is not None and ffprobe_duration > 0:
                 duration_s = ffprobe_duration
 
+            # Stream-recorded containers (e.g. Chrome MediaRecorder WebM) omit duration from EBML header.
+            # Perform fast stream-copy remux with FFmpeg to populate container duration and seek index.
+            if duration_s <= 0.0 or cv_frame_count <= 0:
+                remuxed_path = video_path.parent / f"remux_{video_path.name}"
+                cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(video_path.resolve()), "-c", "copy", str(remuxed_path.resolve())]
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if res.returncode == 0 and remuxed_path.exists() and remuxed_path.stat().st_size > 0:
+                    logger.info(f"Stream-recorded media successfully finalized with FFmpeg: {remuxed_path.name}")
+                    video_path = remuxed_path
+                    has_video_stream, has_audio_stream, ffprobe_duration, ffprobe_fps, ffprobe_dims = (
+                        self._probe_media_streams(video_path)
+                    )
+                    cap.release()
+                    cap = cv2.VideoCapture(str(video_path.resolve()))
+                    cv_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    cv_fps = float(cap.get(cv2.CAP_PROP_FPS))
+                    cv_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    cv_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    width = cv_width if cv_width > 0 else (ffprobe_dims[0] if ffprobe_dims else width)
+                    height = cv_height if cv_height > 0 else (ffprobe_dims[1] if ffprobe_dims else height)
+                    fps = cv_fps if cv_fps > 0 else (ffprobe_fps or fps or 30.0)
+                    if ffprobe_duration is not None and ffprobe_duration > 0:
+                        duration_s = ffprobe_duration
+                    elif cv_frame_count > 0 and fps > 0:
+                        duration_s = cv_frame_count / fps
+
             if width <= 0 or height <= 0:
                 raise CorruptedVideoError("Invalid video dimensions (0x0). Video may be corrupted.")
-
-            if duration_s <= 0.0 and cv_frame_count <= 0:
-                raise CorruptedVideoError("Unable to determine video length or read frames.")
-
-            # Validate maximum duration
-            if duration_s > self.max_duration_s:
-                raise VideoDurationExceededError(
-                    f"Video duration ({duration_s:.1f}s) exceeds maximum allowed limit of {self.max_duration_s:.1f}s."
-                )
-
-            logger.info(
-                f"Video inspection: {width}x{height} @ {fps:.2f} FPS | "
-                f"Duration: {duration_s:.2f}s | Audio stream: {has_audio_stream}"
-            )
 
             # 3. Sample frames at ~1 FPS
             frame_samples = self._sample_frames(
@@ -159,6 +172,20 @@ class VideoProcessor:
             if not frame_samples:
                 raise CorruptedVideoError("Failed to extract any readable frames from video stream.")
 
+            # If duration could not be extracted from header, calculate from sampled frames
+            if duration_s <= 0.0 and frame_samples:
+                duration_s = frame_samples[-1].timestamp_s + (1.0 / fps if fps > 0 else 1.0)
+
+            # Validate maximum duration
+            if duration_s > self.max_duration_s:
+                raise VideoDurationExceededError(
+                    f"Video duration ({duration_s:.1f}s) exceeds maximum allowed limit of {self.max_duration_s:.1f}s."
+                )
+
+            logger.info(
+                f"Video inspection: {width}x{height} @ {fps:.2f} FPS | "
+                f"Duration: {duration_s:.2f}s | Audio stream: {has_audio_stream}"
+            )
             logger.info(f"Extracted {len(frame_samples)} frame samples at ~{self.sample_fps} FPS.")
 
         finally:

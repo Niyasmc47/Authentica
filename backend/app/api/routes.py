@@ -1,3 +1,5 @@
+from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.core.config import settings
@@ -41,6 +43,58 @@ async def health_check():
     )
 
 
+# Analysis cache backed by both in-memory dict and disk persistence
+_ANALYSIS_CACHE: dict[str, AnalysisResponse] = {}
+
+
+def _get_analysis_cache_dir() -> Path:
+    cache_dir = settings.TEMP_DIR / "analyses"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _save_analysis_to_cache(result: AnalysisResponse) -> None:
+    _ANALYSIS_CACHE[result.id] = result
+    try:
+        cache_file = _get_analysis_cache_dir() / f"{result.id}.json"
+        cache_file.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Failed to persist analysis {result.id} to disk cache: {e}")
+
+
+def _load_analysis_from_cache(analysis_id: str) -> Optional[AnalysisResponse]:
+    if analysis_id in _ANALYSIS_CACHE:
+        return _ANALYSIS_CACHE[analysis_id]
+    
+    try:
+        cache_file = _get_analysis_cache_dir() / f"{analysis_id}.json"
+        if cache_file.exists():
+            data = AnalysisResponse.model_validate_json(cache_file.read_text(encoding="utf-8"))
+            _ANALYSIS_CACHE[analysis_id] = data
+            return data
+    except Exception as e:
+        logger.warning(f"Failed to read analysis {analysis_id} from disk cache: {e}")
+
+    return None
+
+
+@router.get(
+    "/analyses/{analysis_id}",
+    response_model=AnalysisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get analysis report by ID",
+    description="Retrieves a completed forensic analysis report by its unique UUID."
+)
+async def get_analysis_by_id(analysis_id: str):
+    cached = _load_analysis_from_cache(analysis_id)
+    if cached:
+        return cached
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Analysis with ID '{analysis_id}' was not found or has expired."
+    )
+
+
 @router.post(
     "/analyses",
     response_model=AnalysisResponse,
@@ -53,7 +107,9 @@ async def analyze_video(
     service: AnalysisService = Depends(get_analysis_service)
 ):
     try:
-        return await service.analyze_video(file)
+        result = await service.analyze_video(file)
+        _save_analysis_to_cache(result)
+        return result
     except (InvalidFileExtensionError, InvalidMimeTypeError) as e:
         logger.warning(f"Validation error: {e}")
         raise HTTPException(
