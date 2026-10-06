@@ -4,6 +4,7 @@ import {
   History as HistoryIcon, 
   Trash2, 
   FileVideo, 
+  Music,
   ArrowRight, 
   ShieldAlert, 
   ShieldCheck, 
@@ -35,7 +36,8 @@ export const HistoryPage: React.FC = () => {
   const filteredItems = historyItems.filter((item) =>
     item.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
     item.sha256.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.action.toLowerCase().includes(searchTerm.toLowerCase())
+    item.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (item.media_type && item.media_type.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
@@ -49,7 +51,7 @@ export const HistoryPage: React.FC = () => {
             <span>Analysis History</span>
           </h1>
           <p className="mt-1 text-xs sm:text-sm text-slate-400">
-            Locally cached forensic reports from your recent video analyses.
+            Locally cached forensic reports from your recent video &amp; audio analyses.
           </p>
         </div>
 
@@ -95,6 +97,7 @@ export const HistoryPage: React.FC = () => {
           {filteredItems.map((item) => {
             const isHigh = item.action === 'STOP_AND_VERIFY' || item.fraud_level === 'HIGH' || item.media_verdict === 'LIKELY_MANIPULATED';
             const isMedium = item.action === 'VERIFY' || item.media_verdict === 'SUSPICIOUS';
+            const isAudioItem = item.media_type === 'AUDIO';
 
             return (
               <div
@@ -109,12 +112,23 @@ export const HistoryPage: React.FC = () => {
                     isMedium ? 'bg-amber-950/60 border-amber-900 text-amber-400' :
                     'bg-slate-900 border-slate-800 text-cyan-400'
                   }`}>
-                    <FileVideo className="w-6 h-6" />
+                    {isAudioItem ? (
+                      <Music className="w-6 h-6 text-purple-400" />
+                    ) : (
+                      <FileVideo className="w-6 h-6 text-cyan-400" />
+                    )}
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-slate-200 group-hover:text-cyan-300 transition-colors">
-                      {item.filename}
-                    </h3>
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-base font-bold text-slate-200 group-hover:text-cyan-300 transition-colors">
+                        {item.filename}
+                      </h3>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        isAudioItem ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+                      }`}>
+                        {item.media_type || 'VIDEO'}
+                      </span>
+                    </div>
                     <div className="flex flex-wrap items-center gap-2 mt-1 text-xs font-mono text-slate-400">
                       <span>{item.duration_s.toFixed(1)}s</span>
                       <span>·</span>

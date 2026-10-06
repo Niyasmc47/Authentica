@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useLocation, useNavigate, Link } from 'react-router-dom';
 import { 
   ShieldAlert, 
@@ -22,7 +22,13 @@ import {
   KeyRound,
   ExternalLink,
   ShieldQuestion,
-  Sparkles
+  Sparkles,
+  Music,
+  Headphones,
+  Volume2,
+  Play,
+  Pause,
+  RotateCcw
 } from 'lucide-react';
 import { AnalysisResponse, TimelineEvent, FraudRequestedAction, FraudCategoryEvidence } from '../types/analysis';
 import { getAnalysisById } from '../services/api';
@@ -46,6 +52,8 @@ export const ResultsPage: React.FC = () => {
 
   const [copiedHash, setCopiedHash] = useState<boolean>(false);
   const [selectedTimelineEvent, setSelectedTimelineEvent] = useState<TimelineEvent | null>(null);
+  const [activePlaybackTime, setActivePlaybackTime] = useState<number>(0);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
 
   useEffect(() => {
     if (!analysis && id) {
@@ -55,6 +63,24 @@ export const ResultsPage: React.FC = () => {
       }
     }
   }, [id, analysis]);
+
+  // Simulated audio playback timer for time-scrubbing transcripts
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (isPlaying) {
+      interval = setInterval(() => {
+        setActivePlaybackTime((prev) => {
+          const totalDur = analysis?.video?.duration_s || analysis?.audio_metadata?.duration_s || 10;
+          if (prev >= totalDur) {
+            setIsPlaying(false);
+            return 0;
+          }
+          return Math.min(prev + 0.5, totalDur);
+        });
+      }, 500);
+    }
+    return () => clearInterval(interval);
+  }, [isPlaying, analysis]);
 
   if (!analysis) {
     return (
@@ -77,14 +103,19 @@ export const ResultsPage: React.FC = () => {
     );
   }
 
-  const { video, visual, audio, speech, reliability, evidence, timeline, assessment, explanation, limitations, fraud } = analysis;
+  const { video, audio_metadata, visual, audio, speech, reliability, evidence, timeline, assessment, explanation, limitations, fraud } = analysis;
+
+  const isAudio = analysis.input?.media_type === 'AUDIO' || !video;
+  const filename = video?.filename || audio_metadata?.filename || 'Uploaded Media';
+  const sha256 = video?.sha256 || audio_metadata?.sha256 || 'N/A';
+  const totalDuration = video?.duration_s || audio_metadata?.duration_s || 1.0;
 
   const mediaVerdict = assessment?.media || 'UNCERTAIN';
   const fraudLevel = assessment?.fraud || fraud?.level || 'NOT_ASSESSABLE';
   const finalAction = assessment?.action || 'VERIFY';
 
   const copySha256 = () => {
-    navigator.clipboard.writeText(video.sha256);
+    navigator.clipboard.writeText(sha256);
     setCopiedHash(true);
     setTimeout(() => setCopiedHash(false), 2000);
   };
@@ -93,7 +124,7 @@ export const ResultsPage: React.FC = () => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(analysis, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `authentica_report_${video.filename}_${analysis.id.slice(0, 8)}.json`);
+    downloadAnchor.setAttribute('download', `authentica_report_${filename}_${analysis.id.slice(0, 8)}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -222,9 +253,6 @@ export const ResultsPage: React.FC = () => {
   const fraudBadge = getFraudRiskBadge(fraudLevel);
   const actionBadge = getActionBadge(finalAction);
 
-  // Helper for timeline duration
-  const totalDuration = video.duration_s || 1.0;
-
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       
@@ -244,12 +272,25 @@ export const ResultsPage: React.FC = () => {
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-3 mt-2 text-xs font-mono text-slate-400">
-            <span className="flex items-center space-x-1 text-slate-300">
-              <FileVideo className="w-3.5 h-3.5 text-cyan-400" />
-              <span>{video.filename}</span>
+            <span className="flex items-center space-x-1.5 text-slate-300">
+              {isAudio ? (
+                <Music className="w-3.5 h-3.5 text-purple-400" />
+              ) : (
+                <FileVideo className="w-3.5 h-3.5 text-cyan-400" />
+              )}
+              <span className="font-semibold">{filename}</span>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                isAudio ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+              }`}>
+                {isAudio ? 'AUDIO' : 'VIDEO'}
+              </span>
             </span>
             <span>·</span>
-            <span>{video.duration_s.toFixed(1)}s ({video.width}×{video.height} @ {video.fps.toFixed(0)}fps)</span>
+            {isAudio ? (
+              <span>{totalDuration.toFixed(1)}s ({audio_metadata?.codec || 'PCM'} · {audio_metadata?.sample_rate_hz || 16000}Hz · {audio_metadata?.channels === 1 ? 'Mono' : 'Stereo'})</span>
+            ) : (
+              <span>{video ? `${video.duration_s.toFixed(1)}s (${video.width}×${video.height} @ ${video.fps.toFixed(0)}fps)` : `${totalDuration.toFixed(1)}s`}</span>
+            )}
             <span>·</span>
             <span>Analyzed {new Date(analysis.created_at).toLocaleTimeString()}</span>
           </div>
@@ -264,7 +305,7 @@ export const ResultsPage: React.FC = () => {
             title="Copy SHA-256 Fingerprint"
           >
             {copiedHash ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-            <span>SHA-256: {video.sha256.slice(0, 10)}...</span>
+            <span>SHA-256: {sha256.slice(0, 10)}...</span>
           </button>
 
           <button
@@ -390,21 +431,33 @@ export const ResultsPage: React.FC = () => {
                 <span>Visual Forensics</span>
               </span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                isAudio ? 'bg-slate-800 text-slate-400 border border-slate-700' :
                 evidence?.visual.level === 'HIGH' ? 'bg-rose-950 text-rose-400 border border-rose-800' :
                 evidence?.visual.level === 'MEDIUM' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
                 'bg-emerald-950 text-emerald-400 border border-emerald-800'
               }`}>
-                {evidence?.visual.level || 'N/A'}
+                {isAudio ? 'N/A (AUDIO)' : (evidence?.visual.level || 'N/A')}
               </span>
             </div>
             <div>
-              <p className="text-xs font-semibold text-slate-200">{visual.model || 'EfficientNet-B0-FFPP-C23'}</p>
-              <p className="text-[11px] text-slate-400 font-mono mt-1">
-                Peak Score: {evidence?.visual.models[0]?.score.toFixed(4) ?? visual.results[0]?.fake_score?.toFixed(4) ?? '0.0000'}
-              </p>
-              <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-                Faces Analyzed: {visual.faces_found}/{visual.frames_analyzed} frames
-              </p>
+              {isAudio ? (
+                <div>
+                  <p className="text-xs font-semibold text-slate-300">Not Applicable</p>
+                  <p className="text-[11px] text-slate-500 font-mono mt-1">
+                    Visual deepfake detectors are bypassed for audio-only input.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-xs font-semibold text-slate-200">{visual.model || 'EfficientNet-B0-FFPP-C23'}</p>
+                  <p className="text-[11px] text-slate-400 font-mono mt-1">
+                    Peak Score: {evidence?.visual.models[0]?.score?.toFixed(4) ?? visual.results[0]?.fake_score?.toFixed(4) ?? '0.0000'}
+                  </p>
+                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                    Faces Analyzed: {visual.faces_found}/{visual.frames_analyzed} frames
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -525,47 +578,49 @@ export const ResultsPage: React.FC = () => {
             <span>{totalDuration.toFixed(1)}s</span>
           </div>
 
-          {/* Track 1: Visual Windows */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-xs font-mono text-slate-400">
-              <span className="flex items-center space-x-1.5">
-                <Eye className="w-3.5 h-3.5 text-cyan-400" />
-                <span>VISUAL DETECTIONS</span>
-              </span>
+          {/* Track 1: Visual Windows (Video Only) */}
+          {!isAudio && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs font-mono text-slate-400">
+                <span className="flex items-center space-x-1.5">
+                  <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>VISUAL DETECTIONS</span>
+                </span>
+              </div>
+              <div className="h-6 w-full bg-slate-900 rounded-lg relative overflow-hidden flex items-center">
+                {visual.results.map((vr, i) => {
+                  const left = (vr.timestamp_s / totalDuration) * 100;
+                  const width = Math.max((1.0 / totalDuration) * 100, 3);
+                  const isHigh = (vr.fake_score || 0) >= 0.70;
+                  return (
+                    <div
+                      key={i}
+                      style={{ left: `${left}%`, width: `${width}%` }}
+                      onClick={() => setSelectedTimelineEvent({
+                        start_s: vr.timestamp_s,
+                        end_s: vr.timestamp_s + 1.0,
+                        kind: 'visual',
+                        level: isHigh ? 'HIGH' : 'LOW',
+                        evidence_source: 'EfficientNet-B0 Face Crop',
+                        score: vr.fake_score,
+                      })}
+                      className={`absolute h-4 rounded cursor-pointer transition-all hover:scale-110 ${
+                        isHigh ? 'bg-rose-500 hover:bg-rose-400' : 'bg-emerald-600/60 hover:bg-emerald-500'
+                      }`}
+                      title={`Visual @ ${vr.timestamp_s.toFixed(1)}s | Fake Score: ${(vr.fake_score || 0).toFixed(4)}`}
+                    />
+                  );
+                })}
+              </div>
             </div>
-            <div className="h-6 w-full bg-slate-900 rounded-lg relative overflow-hidden flex items-center">
-              {visual.results.map((vr, i) => {
-                const left = (vr.timestamp_s / totalDuration) * 100;
-                const width = Math.max((1.0 / totalDuration) * 100, 3);
-                const isHigh = (vr.fake_score || 0) >= 0.70;
-                return (
-                  <div
-                    key={i}
-                    style={{ left: `${left}%`, width: `${width}%` }}
-                    onClick={() => setSelectedTimelineEvent({
-                      start_s: vr.timestamp_s,
-                      end_s: vr.timestamp_s + 1.0,
-                      kind: 'visual',
-                      level: isHigh ? 'HIGH' : 'LOW',
-                      evidence_source: 'EfficientNet-B0 Face Crop',
-                      score: vr.fake_score,
-                    })}
-                    className={`absolute h-4 rounded cursor-pointer transition-all hover:scale-110 ${
-                      isHigh ? 'bg-rose-500 hover:bg-rose-400' : 'bg-emerald-600/60 hover:bg-emerald-500'
-                    }`}
-                    title={`Visual @ ${vr.timestamp_s.toFixed(1)}s | Fake Score: ${(vr.fake_score || 0).toFixed(4)}`}
-                  />
-                );
-              })}
-            </div>
-          </div>
+          )}
 
           {/* Track 2: Audio Windows */}
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs font-mono text-slate-400">
               <span className="flex items-center space-x-1.5">
                 <Mic className="w-3.5 h-3.5 text-purple-400" />
-                <span>AUDIO WINDOWS</span>
+                <span>AUDIO WINDOWS (AASIST)</span>
               </span>
             </div>
             <div className="h-6 w-full bg-slate-900 rounded-lg relative overflow-hidden flex items-center">
@@ -693,6 +748,56 @@ export const ResultsPage: React.FC = () => {
 
         </div>
       </div>
+
+      {/* 4b. Forensic Speech & Transcript Inspector */}
+      {speech.segments && speech.segments.length > 0 && (
+        <div className="glass-panel rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-bold text-white flex items-center space-x-2">
+                <Mic className="w-5 h-5 text-purple-400" />
+                <span>Forensic Speech Transcript ({speech.model || 'Faster-Whisper'})</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Timestamped transcription with automated fraud indicator mapping (Language: {speech.language || 'en'}).
+              </p>
+            </div>
+            <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-3 py-1 rounded-lg border border-slate-800">
+              {speech.segments.length} segment{speech.segments.length === 1 ? '' : 's'} · {speech.processing_time_s ? `${speech.processing_time_s.toFixed(2)}s process time` : 'processed'}
+            </span>
+          </div>
+
+          <div className="space-y-2 max-h-72 overflow-y-auto pr-2">
+            {speech.segments.map((seg, idx) => {
+              const hasFraudAction = fraud?.requested_actions?.some(
+                (act) => Math.max(seg.start_s, act.start_s) < Math.min(seg.end_s, act.end_s)
+              );
+              return (
+                <div
+                  key={idx}
+                  className={`p-3 rounded-xl border transition-colors flex items-start space-x-3 ${
+                    hasFraudAction
+                      ? 'bg-rose-950/40 border-rose-900/80 text-rose-100'
+                      : 'bg-slate-900/70 border-slate-800/80 text-slate-300'
+                  }`}
+                >
+                  <span className="font-mono text-xs text-cyan-400 font-semibold shrink-0 pt-0.5">
+                    [{seg.start_s.toFixed(1)}s – {seg.end_s.toFixed(1)}s]
+                  </span>
+                  <p className="text-xs leading-relaxed flex-1">
+                    {seg.text}
+                  </p>
+                  {hasFraudAction && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-900 text-rose-200 shrink-0">
+                      FLAGGED DIRECTIVE
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 5. Stage 3 Fraud Intent Findings & Requested Directives */}
       <div className="glass-panel rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-6">

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   UploadCloud, 
   FileVideo, 
+  Music,
   CheckCircle2, 
   AlertTriangle, 
   ShieldAlert, 
@@ -12,14 +13,17 @@ import {
   FileCheck,
   X,
   ArrowRight,
-  Loader2
+  Loader2,
+  Headphones
 } from 'lucide-react';
 import { analyzeVideo, ApiError } from '../services/api';
 
 const MAX_FILE_SIZE_MB = 100;
-const ALLOWED_EXTENSIONS = ['.mp4', '.mov', '.avi', '.webm', '.mkv'];
+const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.avi', '.webm', '.mkv'];
+const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac', '.wma'];
+const ALLOWED_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS];
 
-const ANALYSIS_STEPS = [
+const VIDEO_STEPS = [
   'Media validated & container parsed',
   'Extracting video frames & audio stream',
   'Running visual facial manipulation detection (EfficientNet-B0)',
@@ -27,6 +31,16 @@ const ANALYSIS_STEPS = [
   'Transcribing speech & detecting language (Whisper)',
   'Inspecting C2PA Content Credentials provenance',
   'Synthesizing multi-modal evidence timeline',
+  'Evaluating social-engineering & fraud indicators',
+];
+
+const AUDIO_STEPS = [
+  'Audio container & format validated',
+  'Extracting 16kHz forensic audio waveform',
+  'Running acoustic anti-spoofing analysis (AASIST)',
+  'Transcribing speech & detecting language (Whisper)',
+  'Inspecting C2PA Content Credentials provenance',
+  'Synthesizing acoustic timeline events',
   'Evaluating social-engineering & fraud indicators',
 ];
 
@@ -40,6 +54,12 @@ export const AnalyzePage: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
 
+  const isAudioFile = selectedFile 
+    ? AUDIO_EXTENSIONS.some(ext => selectedFile.name.toLowerCase().endsWith(ext)) || selectedFile.type.startsWith('audio/')
+    : false;
+
+  const currentSteps = isAudioFile ? AUDIO_STEPS : VIDEO_STEPS;
+
   // Deterministic step advancement during active upload/processing
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
@@ -47,7 +67,7 @@ export const AnalyzePage: React.FC = () => {
       setCurrentStepIndex(0);
       interval = setInterval(() => {
         setCurrentStepIndex((prev) => {
-          if (prev < ANALYSIS_STEPS.length - 1) {
+          if (prev < currentSteps.length - 1) {
             return prev + 1;
           }
           return prev;
@@ -55,7 +75,7 @@ export const AnalyzePage: React.FC = () => {
       }, 1400);
     }
     return () => clearInterval(interval);
-  }, [isAnalyzing]);
+  }, [isAnalyzing, currentSteps.length]);
 
   const validateFile = (file: File): boolean => {
     setError(null);
@@ -137,7 +157,7 @@ export const AnalyzePage: React.FC = () => {
           AI Media Authenticity &amp; Fraud Protection
         </h1>
         <p className="mt-3 text-sm sm:text-base text-slate-400 max-w-2xl mx-auto">
-          Analyze suspicious video or audio files for synthetic manipulation, cloned voices, and social-engineering fraud directives.
+          Analyze suspicious video or standalone audio files for synthetic manipulation, cloned voices, and social-engineering fraud directives.
         </p>
       </div>
 
@@ -179,13 +199,14 @@ export const AnalyzePage: React.FC = () => {
               </div>
 
               <p className="text-base font-medium text-slate-200">
-                Drag &amp; drop your media file here, or <span className="text-cyan-400 underline underline-offset-4">browse files</span>
+                Drag &amp; drop your video or audio file here, or <span className="text-cyan-400 underline underline-offset-4">browse files</span>
               </p>
 
               <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs font-mono text-slate-400">
-                <span className="px-2 py-1 rounded bg-slate-800/80 border border-slate-700/60">MP4, MOV, WEBM, AVI, MKV</span>
+                <span className="px-2.5 py-1 rounded bg-slate-800/80 border border-slate-700/60 text-cyan-300">Video: MP4, MOV, WEBM, AVI, MKV</span>
+                <span className="px-2.5 py-1 rounded bg-slate-800/80 border border-slate-700/60 text-purple-300">Audio: WAV, MP3, M4A, FLAC, OGG, AAC</span>
                 <span className="px-2 py-1 rounded bg-slate-800/80 border border-slate-700/60">Max {MAX_FILE_SIZE_MB}MB</span>
-                <span className="px-2 py-1 rounded bg-slate-800/80 border border-slate-700/60">Max 90 Seconds</span>
+                <span className="px-2 py-1 rounded bg-slate-800/80 border border-slate-700/60">Max 90s</span>
               </div>
             </div>
 
@@ -193,13 +214,24 @@ export const AnalyzePage: React.FC = () => {
             {selectedFile && (
               <div className="mt-5 p-4 rounded-xl bg-slate-900/90 border border-slate-700 flex items-center justify-between animate-fadeIn">
                 <div className="flex items-center space-x-3 truncate">
-                  <div className="p-2.5 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400">
-                    <FileVideo className="w-5 h-5" />
+                  <div className={`p-2.5 rounded-lg border ${
+                    isAudioFile 
+                      ? 'bg-purple-950 border-purple-800 text-purple-400' 
+                      : 'bg-cyan-950 border-cyan-800 text-cyan-400'
+                  }`}>
+                    {isAudioFile ? <Music className="w-5 h-5" /> : <FileVideo className="w-5 h-5" />}
                   </div>
                   <div className="truncate">
-                    <p className="text-sm font-semibold text-slate-200 truncate">{selectedFile.name}</p>
-                    <p className="text-xs text-slate-400 font-mono">
-                      {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB · {selectedFile.type || 'video/mp4'}
+                    <div className="flex items-center space-x-2">
+                      <p className="text-sm font-semibold text-slate-200 truncate">{selectedFile.name}</p>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                        isAudioFile ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+                      }`}>
+                        {isAudioFile ? 'AUDIO' : 'VIDEO'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 font-mono mt-0.5">
+                      {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB · {selectedFile.type || (isAudioFile ? 'audio' : 'video')}
                     </p>
                   </div>
                 </div>
@@ -243,7 +275,7 @@ export const AnalyzePage: React.FC = () => {
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
                 }`}
               >
-                <span>Analyze Media</span>
+                <span>Analyze {isAudioFile ? 'Audio' : 'Media'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -256,7 +288,9 @@ export const AnalyzePage: React.FC = () => {
                 <Loader2 className="w-7 h-7 animate-spin" />
                 <div className="absolute inset-0 rounded-2xl border border-cyan-400/40 animate-ping opacity-25" />
               </div>
-              <h3 className="text-xl font-bold text-white">Analyzing Media Security &amp; Fraud Risk</h3>
+              <h3 className="text-xl font-bold text-white">
+                Analyzing {isAudioFile ? 'Audio' : 'Media'} Security &amp; Fraud Risk
+              </h3>
               <p className="text-xs font-mono text-slate-400 mt-1">
                 Processing: <span className="text-cyan-300">{selectedFile?.name}</span>
               </p>
@@ -264,10 +298,9 @@ export const AnalyzePage: React.FC = () => {
 
             {/* Stages checklist */}
             <div className="space-y-3 max-w-xl mx-auto">
-              {ANALYSIS_STEPS.map((step, idx) => {
+              {currentSteps.map((step, idx) => {
                 const isDone = idx < currentStepIndex;
                 const isCurrent = idx === currentStepIndex;
-                const isPending = idx > currentStepIndex;
 
                 return (
                   <div
@@ -298,7 +331,7 @@ export const AnalyzePage: React.FC = () => {
             </div>
 
             <div className="mt-8 text-center text-xs text-slate-500 font-mono">
-              Running native PyTorch, MediaPipe &amp; Whisper models locally...
+              Running native PyTorch AASIST &amp; Faster-Whisper models locally...
             </div>
           </div>
         )}

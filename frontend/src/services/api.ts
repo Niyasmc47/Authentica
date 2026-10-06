@@ -54,12 +54,18 @@ export async function analyzeVideo(file: File): Promise<AnalysisResponse> {
 export function saveToHistory(analysis: AnalysisResponse): void {
   try {
     const history = getHistory();
+    const isAudio = analysis.input?.media_type === 'AUDIO' || !analysis.video;
+    const filename = analysis.video?.filename || analysis.audio_metadata?.filename || 'Uploaded Audio';
+    const duration_s = analysis.video?.duration_s ?? analysis.audio_metadata?.duration_s ?? 0;
+    const sha256 = analysis.video?.sha256 || analysis.audio_metadata?.sha256 || 'N/A';
+
     const item: HistoryItem = {
       id: analysis.id,
       created_at: analysis.created_at,
-      filename: analysis.video.filename,
-      duration_s: analysis.video.duration_s,
-      sha256: analysis.video.sha256,
+      filename,
+      media_type: isAudio ? 'AUDIO' : 'VIDEO',
+      duration_s,
+      sha256,
       media_verdict: analysis.assessment?.media || 'UNCERTAIN',
       fraud_level: analysis.assessment?.fraud || analysis.fraud?.level || 'LOW',
       action: analysis.assessment?.action || 'VERIFY',

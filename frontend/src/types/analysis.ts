@@ -79,12 +79,28 @@ export interface ProvenanceResult {
   note: string;
 }
 
-export interface EvidenceMetadata {
-  width: number;
-  height: number;
+export interface InputInfo {
+  media_type: 'VIDEO' | 'AUDIO';
+}
+
+export interface AudioMetadata {
+  filename: string;
+  sha256: string;
   duration_s: number;
-  fps: number;
-  frames_sampled: number;
+  sample_rate_hz?: number | null;
+  channels?: number | null;
+  codec?: string | null;
+  bitrate_kbps?: number | null;
+  mime_type?: string | null;
+}
+
+export interface EvidenceMetadata {
+  media_type?: 'VIDEO' | 'AUDIO';
+  width?: number | null;
+  height?: number | null;
+  duration_s: number;
+  fps?: number | null;
+  frames_sampled?: number | null;
   audio_available: boolean;
 }
 
@@ -141,7 +157,9 @@ export interface AnalysisResponse {
   id: string;
   status: 'completed' | 'partial' | 'error';
   created_at: string;
-  video: VideoInfo;
+  input?: InputInfo;
+  video?: VideoInfo | null;
+  audio_metadata?: AudioMetadata | null;
   visual: VisualResult;
   audio: AudioResult;
   speech: SpeechResult;
@@ -158,6 +176,7 @@ export interface HistoryItem {
   id: string;
   created_at: string;
   filename: string;
+  media_type: 'VIDEO' | 'AUDIO';
   duration_s: number;
   sha256: string;
   media_verdict: string;
