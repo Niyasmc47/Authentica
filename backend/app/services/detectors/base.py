@@ -53,14 +53,14 @@ class AudioDetector(ABC):
     async def analyze(
         self,
         audio_path: Optional[Path],
-        video_info: VideoInfo
+        video_info: Optional[VideoInfo] = None
     ) -> AudioResult:
         """
         Runs voice spoofing and deepfake audio detection.
         
         Args:
             audio_path: Path to extracted 16kHz mono WAV file (or None if no audio stream).
-            video_info: Video metadata.
+            video_info: Video metadata (or None for audio-only media).
             
         Returns:
             AudioResult matching the Stage 1 data contract.
@@ -78,14 +78,14 @@ class SpeechToText(ABC):
     async def transcribe(
         self,
         audio_path: Optional[Path],
-        video_info: VideoInfo
+        video_info: Optional[VideoInfo] = None
     ) -> SpeechResult:
         """
         Transcribes speech audio into timestamped text segments.
         
         Args:
             audio_path: Path to extracted 16kHz mono WAV file (or None if no audio stream).
-            video_info: Video metadata.
+            video_info: Video metadata (or None for audio-only media).
             
         Returns:
             SpeechResult matching the Stage 1 data contract.

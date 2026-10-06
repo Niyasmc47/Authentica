@@ -8,7 +8,9 @@ from app.core.config import settings
 from app.core.logging import logger
 from app.schemas.analysis import (
     AnalysisResponse,
+    AudioMetadata,
     AudioResult,
+    InputInfo,
     SpeechResult,
     VideoInfo,
     VisualResult,
@@ -31,6 +33,7 @@ from app.services.fraud_engine import FraudIntentEngine
 from app.services.reliability_service import ReliabilityService
 from app.services.timeline_service import TimelineService
 from app.services.video_processor import (
+    AudioProcessingResult,
     CorruptedVideoError,
     VideoDurationExceededError,
     VideoProcessingError,
@@ -60,21 +63,23 @@ class FileTooLargeError(ValidationException):
 class AnalysisService:
     """
     Orchestration service for Authentica Media Analysis Pipeline (Stage 1, Stage 2 & Stage 3).
+    Supports both VIDEO and AUDIO media types.
     
     Coordinates:
       1. Validation of upload MIME, extension, size
       2. Ephemeral workspace creation
       3. SHA-256 fingerprinting
-      4. Video inspection, frame sampling, audio extraction
-      5. C2PA Content Credentials / Provenance inspection
-      6. Sensory deepfake detectors (Visual, Audio, Speech)
-      7. Stage 3 Fraud Intent & Social-Engineering Engine
-      8. Reliability Gate evaluation
-      9. Multi-modal Evidence Matrix synthesis
-      10. Timeline aggregation and noise reduction (Visual, Audio, Transcript, Fraud)
-      11. Media Assessment, Fraud Synthesis & Final Recommended Action
-      12. Assembly of standardized full-stage response
-      13. Guaranteed ephemeral artifact cleanup (zero data retention)
+      4. Container media type detection (VIDEO vs AUDIO)
+      5. Media processing (video frame sampling / audio conversion)
+      6. C2PA Content Credentials / Provenance inspection
+      7. Sensory deepfake detectors (Visual, Audio, Speech)
+      8. Stage 3 Fraud Intent & Social-Engineering Engine
+      9. Reliability Gate evaluation
+      10. Multi-modal Evidence Matrix synthesis
+      11. Timeline aggregation and noise reduction
+      12. Media Assessment, Fraud Synthesis & Final Recommended Action
+      13. Assembly of standardized full-stage response
+      14. Guaranteed ephemeral artifact cleanup (zero data retention)
     """
 
     def __init__(
@@ -105,7 +110,7 @@ class AnalysisService:
 
     async def analyze_video(self, file: UploadFile) -> AnalysisResponse:
         """
-        Processes an uploaded video through the unified Stage 1, 2, and 3 pipeline.
+        Processes an uploaded media file (video or audio) through the unified Stage 1, 2, and 3 pipeline.
         
         Args:
             file: FastAPI UploadFile object from multipart request.
@@ -115,7 +120,7 @@ class AnalysisService:
         """
         analysis_id = str(uuid.uuid4())
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        original_filename = file.filename or "unknown_video.mp4"
+        original_filename = file.filename or "unknown_media.mp4"
 
         logger.info(f"[{analysis_id}] Received analysis request for file: '{original_filename}'")
 
@@ -126,120 +131,219 @@ class AnalysisService:
 
         try:
             # 2. Stream uploaded file safely to temporary disk and enforce size limit
-            saved_video_path = workspace.video_dir / Path(original_filename).name
-            await self._save_upload_file(file, saved_video_path)
+            saved_media_path = workspace.video_dir / Path(original_filename).name
+            await self._save_upload_file(file, saved_media_path)
 
-            logger.info(f"[{analysis_id}] Video saved to temporary location: {saved_video_path}")
+            logger.info(f"[{analysis_id}] Media saved to temporary location: {saved_media_path}")
 
             # 3. Compute SHA-256 hash
-            sha256_hash = compute_sha256(saved_video_path)
+            sha256_hash = compute_sha256(saved_media_path)
             logger.info(f"[{analysis_id}] Computed SHA-256: {sha256_hash}")
 
             # 4. Stage 2 C2PA / Provenance Manifest Inspection
             logger.info(f"[{analysis_id}] Inspecting C2PA provenance credentials...")
-            provenance_result = self.c2pa_service.inspect(saved_video_path)
+            provenance_result = self.c2pa_service.inspect(saved_media_path)
             logger.info(f"[{analysis_id}] Provenance state: {provenance_result.state}")
 
-            # 5. Preprocess video (metadata, frame sampling, audio extraction)
-            logger.info(f"[{analysis_id}] Preprocessing video...")
-            proc_result = self.video_processor.process(
-                video_path=saved_video_path,
-                frames_dir=workspace.frames_dir,
-                audio_dir=workspace.audio_dir,
-            )
-            logger.info(f"[{analysis_id}] Preprocessing completed successfully.")
+            # 5. Determine Media Type (VIDEO vs AUDIO)
+            media_type, probe_meta = self.video_processor.probe_media_type(saved_media_path)
+            logger.info(f"[{analysis_id}] Detected media type: {media_type}")
 
-            # Construct VideoInfo schema
-            video_info = VideoInfo(
-                filename=original_filename,
-                sha256=sha256_hash,
-                duration_s=proc_result.duration_s,
-                fps=proc_result.fps,
-                width=proc_result.width,
-                height=proc_result.height,
-                frames_sampled=proc_result.frames_sampled,
-                audio_available=proc_result.audio_available,
-            )
+            if media_type == "AUDIO":
+                # --- AUDIO PIPELINE ---
+                logger.info(f"[{analysis_id}] Preprocessing standalone audio...")
+                audio_proc = self.video_processor.process_audio(
+                    audio_path=saved_media_path,
+                    audio_dir=workspace.audio_dir
+                )
 
-            # 6. Invoke Visual Detector (Member 2)
-            visual_result = await self._run_visual_detector(
-                analysis_id, proc_result.frame_samples, video_info
-            )
+                audio_metadata = AudioMetadata(
+                    filename=original_filename,
+                    sha256=sha256_hash,
+                    duration_s=audio_proc.duration_s,
+                    sample_rate_hz=audio_proc.sample_rate_hz,
+                    channels=audio_proc.channels,
+                    codec=audio_proc.codec,
+                    bitrate_kbps=audio_proc.bitrate_kbps,
+                    mime_type=audio_proc.mime_type,
+                )
 
-            # 7. Invoke Audio Detector (Member 3)
-            audio_result = await self._run_audio_detector(
-                analysis_id, proc_result.audio_path, video_info
-            )
+                # Visual detector is not applicable for audio-only
+                visual_result = VisualResult(
+                    available=False,
+                    model=None,
+                    status="not_applicable",
+                    frames_analyzed=0,
+                    faces_found=0,
+                    face_detection_rate=None,
+                    results=[]
+                )
 
-            # 8. Invoke Speech-to-Text (Member 3)
-            speech_result = await self._run_speech_transcriber(
-                analysis_id, proc_result.audio_path, video_info
-            )
+                # Audio detector & Transcriber
+                audio_result = await self._run_audio_detector(
+                    analysis_id, audio_proc.audio_path, None
+                )
+                speech_result = await self._run_speech_transcriber(
+                    analysis_id, audio_proc.audio_path, None
+                )
 
-            # 9. Stage 3: Fraud Intent & Social Engineering Engine
-            logger.info(f"[{analysis_id}] Evaluating fraud intent and social engineering risks...")
-            fraud_result = self.fraud_engine.evaluate(speech_result)
-            logger.info(f"[{analysis_id}] Fraud Intent Evaluation: level={fraud_result.level}")
+                # Fraud Intent Engine
+                fraud_result = self.fraud_engine.evaluate(speech_result)
 
-            # 10. Stage 2: Reliability Gate Assessment
-            reliability_result = self.reliability_service.evaluate(
-                video_info=video_info,
-                visual=visual_result,
-                audio=audio_result,
-            )
+                # Reliability Gate (Audio-specific)
+                reliability_result = self.reliability_service.evaluate(
+                    audio_metadata=audio_metadata,
+                    visual=visual_result,
+                    audio=audio_result,
+                    media_type="AUDIO"
+                )
 
-            # 11. Stage 2: Build Evidence Matrix
-            evidence_matrix = self.evidence_service.build_matrix(
-                video_info=video_info,
-                visual=visual_result,
-                audio=audio_result,
-                provenance=provenance_result,
-                reliability=reliability_result,
-            )
+                # Evidence Matrix
+                evidence_matrix = self.evidence_service.build_matrix(
+                    visual=visual_result,
+                    audio=audio_result,
+                    provenance=provenance_result,
+                    reliability=reliability_result,
+                    audio_metadata=audio_metadata,
+                    media_type="AUDIO"
+                )
 
-            # 12. Stage 2 & 3: Timeline Aggregation
-            timeline_events = self.timeline_service.aggregate(
-                visual=visual_result,
-                audio=audio_result,
-                speech=speech_result,
-                video_duration_s=video_info.duration_s,
-                fraud=fraud_result,
-            )
+                # Timeline Aggregation
+                timeline_events = self.timeline_service.aggregate(
+                    visual=visual_result,
+                    audio=audio_result,
+                    speech=speech_result,
+                    video_duration_s=audio_metadata.duration_s,
+                    fraud=fraud_result,
+                )
 
-            # 13. Stage 2 & 3: Media Assessment, Fraud Synthesis & Final Action
-            assessment_result, explanations, limitations = self.assessment_service.assess(
-                matrix=evidence_matrix,
-                timeline=timeline_events,
-                fraud=fraud_result,
-            )
+                # Assessment & Explanations
+                assessment_result, explanations, limitations = self.assessment_service.assess(
+                    matrix=evidence_matrix,
+                    timeline=timeline_events,
+                    fraud=fraud_result,
+                )
 
-            # 14. Assemble Full Stage 1 + Stage 2 + Stage 3 AnalysisResponse
-            response = AnalysisResponse(
-                id=analysis_id,
-                status="completed",
-                created_at=created_at,
-                video=video_info,
-                visual=visual_result,
-                audio=audio_result,
-                speech=speech_result,
-                reliability=reliability_result,
-                evidence=evidence_matrix,
-                timeline=timeline_events,
-                assessment=assessment_result,
-                explanation=explanations,
-                limitations=limitations,
-                fraud=fraud_result,
-            )
+                response = AnalysisResponse(
+                    id=analysis_id,
+                    status="completed",
+                    created_at=created_at,
+                    input=InputInfo(media_type="AUDIO"),
+                    video=None,
+                    audio_metadata=audio_metadata,
+                    visual=visual_result,
+                    audio=audio_result,
+                    speech=speech_result,
+                    reliability=reliability_result,
+                    evidence=evidence_matrix,
+                    timeline=timeline_events,
+                    assessment=assessment_result,
+                    explanation=explanations,
+                    limitations=limitations,
+                    fraud=fraud_result,
+                )
+
+            else:
+                # --- VIDEO PIPELINE ---
+                logger.info(f"[{analysis_id}] Preprocessing video...")
+                proc_result = self.video_processor.process(
+                    video_path=saved_media_path,
+                    frames_dir=workspace.frames_dir,
+                    audio_dir=workspace.audio_dir,
+                )
+                logger.info(f"[{analysis_id}] Preprocessing completed successfully.")
+
+                video_info = VideoInfo(
+                    filename=original_filename,
+                    sha256=sha256_hash,
+                    duration_s=proc_result.duration_s,
+                    fps=proc_result.fps,
+                    width=proc_result.width,
+                    height=proc_result.height,
+                    frames_sampled=proc_result.frames_sampled,
+                    audio_available=proc_result.audio_available,
+                )
+
+                # Invoke Visual Detector (Member 2)
+                visual_result = await self._run_visual_detector(
+                    analysis_id, proc_result.frame_samples, video_info
+                )
+
+                # Invoke Audio Detector (Member 3)
+                audio_result = await self._run_audio_detector(
+                    analysis_id, proc_result.audio_path, video_info
+                )
+
+                # Invoke Speech-to-Text (Member 3)
+                speech_result = await self._run_speech_transcriber(
+                    analysis_id, proc_result.audio_path, video_info
+                )
+
+                # Stage 3: Fraud Intent Engine
+                fraud_result = self.fraud_engine.evaluate(speech_result)
+
+                # Stage 2: Reliability Gate Assessment
+                reliability_result = self.reliability_service.evaluate(
+                    video_info=video_info,
+                    visual=visual_result,
+                    audio=audio_result,
+                    media_type="VIDEO"
+                )
+
+                # Stage 2: Build Evidence Matrix
+                evidence_matrix = self.evidence_service.build_matrix(
+                    video_info=video_info,
+                    visual=visual_result,
+                    audio=audio_result,
+                    provenance=provenance_result,
+                    reliability=reliability_result,
+                    media_type="VIDEO"
+                )
+
+                # Stage 2 & 3: Timeline Aggregation
+                timeline_events = self.timeline_service.aggregate(
+                    visual=visual_result,
+                    audio=audio_result,
+                    speech=speech_result,
+                    video_duration_s=video_info.duration_s,
+                    fraud=fraud_result,
+                )
+
+                # Stage 2 & 3: Media Assessment, Fraud Synthesis & Final Action
+                assessment_result, explanations, limitations = self.assessment_service.assess(
+                    matrix=evidence_matrix,
+                    timeline=timeline_events,
+                    fraud=fraud_result,
+                )
+
+                response = AnalysisResponse(
+                    id=analysis_id,
+                    status="completed",
+                    created_at=created_at,
+                    input=InputInfo(media_type="VIDEO"),
+                    video=video_info,
+                    audio_metadata=None,
+                    visual=visual_result,
+                    audio=audio_result,
+                    speech=speech_result,
+                    reliability=reliability_result,
+                    evidence=evidence_matrix,
+                    timeline=timeline_events,
+                    assessment=assessment_result,
+                    explanation=explanations,
+                    limitations=limitations,
+                    fraud=fraud_result,
+                )
 
             logger.info(
-                f"[{analysis_id}] Pipeline completed: media={assessment_result.media} | "
+                f"[{analysis_id}] Pipeline completed ({media_type}): media={assessment_result.media} | "
                 f"fraud={assessment_result.fraud} | action={assessment_result.action} | "
                 f"reliability={reliability_result.level}"
             )
             return response
 
         finally:
-            # 15. Guaranteed cleanup of all temporary media, frames, and audio
+            # Ephemeral artifact cleanup
             workspace.cleanup()
             logger.debug(f"[{analysis_id}] Ephemeral workspace cleanup completed.")
 
@@ -291,7 +395,7 @@ class AnalysisService:
             logger.error(f"[{analysis_id}] Visual detector encountered error: {e}")
             return VisualResult(available=False, status="error")
 
-    async def _run_audio_detector(self, analysis_id: str, audio_path: Optional[Path], video_info: VideoInfo) -> AudioResult:
+    async def _run_audio_detector(self, analysis_id: str, audio_path: Optional[Path], video_info: Optional[VideoInfo] = None) -> AudioResult:
         try:
             return await self.audio_detector.analyze(audio_path, video_info)
         except NotImplementedError:
@@ -301,7 +405,7 @@ class AnalysisService:
             logger.error(f"[{analysis_id}] Audio detector encountered error: {e}")
             return AudioResult(available=False, status="error")
 
-    async def _run_speech_transcriber(self, analysis_id: str, audio_path: Optional[Path], video_info: VideoInfo) -> SpeechResult:
+    async def _run_speech_transcriber(self, analysis_id: str, audio_path: Optional[Path], video_info: Optional[VideoInfo] = None) -> SpeechResult:
         try:
             return await self.speech_detector.transcribe(audio_path, video_info)
         except NotImplementedError:

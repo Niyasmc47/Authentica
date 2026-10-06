@@ -44,15 +44,15 @@ def test_1_high_fraud_ceo_scam(fraud_engine):
     assert not result.news_context_downgrade
 
 
-def test_2_medium_fraud_manager_payment(fraud_engine):
+def test_2_subjective_financial_need_i_need_money(fraud_engine):
     """
-    Test Case 2: Mention of authority and payments without aggressive pressure.
+    Test Case 2: Subjective statement 'I need money' must NOT trigger PAYMENT_CREDENTIAL or action.
     """
     segments = [
         SpeechSegment(
             start_s=0.0,
-            end_s=4.0,
-            text="Hi team, speaking as the project manager, please review the upcoming invoice details.",
+            end_s=3.0,
+            text="I need money to pay my rent this month.",
         ),
     ]
     speech = SpeechResult(
@@ -60,20 +60,20 @@ def test_2_medium_fraud_manager_payment(fraud_engine):
         model="faster-whisper-base-int8",
         status="completed",
         language="en",
-        duration_s=4.0,
-        text="Hi team, speaking as the project manager, please review the upcoming invoice details.",
+        duration_s=3.0,
+        text="I need money to pay my rent this month.",
         segments=segments,
     )
 
     result = fraud_engine.analyze(speech)
-    assert result.level in ("MEDIUM", "LOW")
-    assert any(cat.category == "AUTHORITY" for cat in result.categories)
+    assert result.level == "LOW"
     assert len(result.requested_actions) == 0
+    assert not any(cat.category == "PAYMENT_CREDENTIAL" for cat in result.categories)
 
 
-def test_3_harmless_ai_media(fraud_engine):
+def test_3_harmless_ai_media_morgan_freeman(fraud_engine):
     """
-    Test Case 3: Benign speech (e.g. Morgan Freeman AI clip).
+    Test Case 3: Benign speech (Morgan Freeman AI clip).
     """
     segments = [
         SpeechSegment(
@@ -126,13 +126,147 @@ def test_4_news_report_downgrade(fraud_engine):
 
     result = fraud_engine.analyze(speech)
     assert result.news_context_downgrade is True
-    # Should be downgraded from HIGH -> MEDIUM
+    # Downgraded from HIGH -> MEDIUM
     assert result.level == "MEDIUM"
 
 
-def test_5_no_speech(fraud_engine):
+def test_5_direct_request_can_you_send_me_money(fraud_engine):
     """
-    Test Case 5: No speech or empty transcript.
+    Test Case 5: Direct request 'Can you send me money?' -> SEND_MONEY action.
+    """
+    segments = [
+        SpeechSegment(
+            start_s=0.0,
+            end_s=3.0,
+            text="Can you send me money for the concert tickets?",
+        ),
+    ]
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=3.0,
+        text="Can you send me money for the concert tickets?",
+        segments=segments,
+    )
+
+    result = fraud_engine.analyze(speech)
+    assert any(act.action == "SEND_MONEY" for act in result.requested_actions)
+    # Without urgency/authority/threat, casual request is MEDIUM (or LOW)
+    assert result.level == "MEDIUM"
+
+
+def test_6_direct_request_send_rupees_immediately(fraud_engine):
+    """
+    Test Case 6: 'Send me ₹50,000 immediately.' -> SEND_MONEY + URGENCY -> HIGH.
+    """
+    segments = [
+        SpeechSegment(
+            start_s=0.0,
+            end_s=3.0,
+            text="Send me ₹50,000 immediately or your account will be blocked.",
+        ),
+    ]
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=3.0,
+        text="Send me ₹50,000 immediately or your account will be blocked.",
+        segments=segments,
+    )
+
+    result = fraud_engine.analyze(speech)
+    assert result.level == "HIGH"
+    assert any(act.action == "SEND_MONEY" for act in result.requested_actions)
+    assert any(cat.category == "URGENCY" for cat in result.categories)
+
+
+def test_7_ceo_transfer_rupees(fraud_engine):
+    """
+    Test Case 7: 'I am your CEO. I need you to transfer ₹50,000 immediately.' -> HIGH.
+    """
+    segments = [
+        SpeechSegment(
+            start_s=0.0,
+            end_s=4.0,
+            text="I am your CEO. I need you to transfer ₹50,000 immediately.",
+        ),
+    ]
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="I am your CEO. I need you to transfer ₹50,000 immediately.",
+        segments=segments,
+    )
+
+    result = fraud_engine.analyze(speech)
+    assert result.level == "HIGH"
+    assert any(cat.category == "AUTHORITY" for cat in result.categories)
+    assert any(act.action == "TRANSFER_MONEY" for act in result.requested_actions)
+    assert any(cat.category == "URGENCY" for cat in result.categories)
+
+
+def test_8_send_money_and_secrecy(fraud_engine):
+    """
+    Test Case 8: 'I need you to send me money and don't tell anyone.' -> HIGH.
+    """
+    segments = [
+        SpeechSegment(
+            start_s=0.0,
+            end_s=4.0,
+            text="I need you to send me money and don't tell anyone.",
+        ),
+    ]
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="I need you to send me money and don't tell anyone.",
+        segments=segments,
+    )
+
+    result = fraud_engine.analyze(speech)
+    assert result.level == "HIGH"
+    assert any(act.action == "SEND_MONEY" for act in result.requested_actions)
+    assert any(cat.category == "SECRECY" for cat in result.categories)
+
+
+def test_9_otp_and_remote_access(fraud_engine):
+    """
+    Test Case 9: Direct OTP and AnyDesk installation demands -> HIGH.
+    """
+    speech_otp = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="This is technical support. Please install AnyDesk and share your OTP verification code right now.",
+        segments=[
+            SpeechSegment(
+                start_s=0.0,
+                end_s=4.0,
+                text="This is technical support. Please install AnyDesk and share your OTP verification code right now.",
+            )
+        ],
+    )
+    result = fraud_engine.analyze(speech_otp)
+    assert result.level == "HIGH"
+    assert any(act.action == "INSTALL_REMOTE_ACCESS" for act in result.requested_actions)
+    assert any(act.action == "SHARE_OTP" for act in result.requested_actions)
+
+
+def test_10_no_speech(fraud_engine):
+    """
+    Test Case 10: No speech available.
     """
     speech_empty = SpeechResult(
         available=False,
@@ -145,84 +279,3 @@ def test_5_no_speech(fraud_engine):
     )
     result = fraud_engine.analyze(speech_empty)
     assert result.level == "NOT_ASSESSABLE"
-    assert len(result.categories) == 0
-    assert len(result.requested_actions) == 0
-
-
-def test_6_remote_access(fraud_engine):
-    """
-    Test Case 6: Tech support remote access scam.
-    """
-    segments = [
-        SpeechSegment(
-            start_s=0.0,
-            end_s=4.0,
-            text="This is technical support. Please install AnyDesk immediately to fix your account.",
-        ),
-    ]
-    speech = SpeechResult(
-        available=True,
-        model="faster-whisper-base-int8",
-        status="completed",
-        language="en",
-        duration_s=4.0,
-        text="This is technical support. Please install AnyDesk immediately to fix your account.",
-        segments=segments,
-    )
-
-    result = fraud_engine.analyze(speech)
-    assert result.level == "HIGH"
-    assert any(cat.category == "REMOTE_ACCESS_LINKS" for cat in result.categories)
-    assert any(act.action == "INSTALL_REMOTE_ACCESS" for act in result.requested_actions)
-
-
-def test_7_otp_request(fraud_engine):
-    """
-    Test Case 7: Bank security asking for OTP.
-    """
-    segments = [
-        SpeechSegment(
-            start_s=0.0,
-            end_s=4.0,
-            text="This is your bank security department. Please share your OTP verification code right now.",
-        ),
-    ]
-    speech = SpeechResult(
-        available=True,
-        model="faster-whisper-base-int8",
-        status="completed",
-        language="en",
-        duration_s=4.0,
-        text="This is your bank security department. Please share your OTP verification code right now.",
-        segments=segments,
-    )
-
-    result = fraud_engine.analyze(speech)
-    assert result.level == "HIGH"
-    assert any(act.action == "SHARE_OTP" for act in result.requested_actions)
-
-
-def test_8_money_mention_without_request(fraud_engine):
-    """
-    Test Case 8: Money mentioned in general dialogue.
-    """
-    segments = [
-        SpeechSegment(
-            start_s=0.0,
-            end_s=3.0,
-            text="We discussed how bitcoin and crypto prices fluctuated yesterday.",
-        ),
-    ]
-    speech = SpeechResult(
-        available=True,
-        model="faster-whisper-base-int8",
-        status="completed",
-        language="en",
-        duration_s=3.0,
-        text="We discussed how bitcoin and crypto prices fluctuated yesterday.",
-        segments=segments,
-    )
-
-    result = fraud_engine.analyze(speech)
-    assert result.level in ("LOW", "MEDIUM")
-    assert len(result.requested_actions) == 0

@@ -6,6 +6,7 @@ class FraudEvidenceItem(BaseModel):
     phrase: str = Field(..., description="The matched phrase or keyword from transcript")
     start_s: float = Field(..., description="Start timestamp of the segment in seconds")
     end_s: float = Field(..., description="End timestamp of the segment in seconds")
+    reason: Optional[str] = Field(None, description="Contextual reason this phrase was classified as evidence")
 
 
 class FraudCategoryEvidence(BaseModel):

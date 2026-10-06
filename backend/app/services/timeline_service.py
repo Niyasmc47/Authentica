@@ -116,13 +116,21 @@ class TimelineService:
             ]
 
             if valid_fake_scores:
+                n_frames = len(valid_fake_scores)
+                sorted_scores = sorted(valid_fake_scores)
                 max_score = round(max(valid_fake_scores), 4)
-                mean_score = round(sum(valid_fake_scores) / len(valid_fake_scores), 4)
+                mean_score = round(sum(valid_fake_scores) / n_frames, 4)
+                median_score = round(
+                    sorted_scores[n_frames // 2] if n_frames % 2 == 1 else (sorted_scores[n_frames // 2 - 1] + sorted_scores[n_frames // 2]) / 2.0,
+                    4
+                )
+                high_count = len([s for s in valid_fake_scores if s >= self.visual_high])
                 
-                # Preliminary level assignment
-                if max_score >= self.visual_high:
+                # Robust window level assignment:
+                # A window is HIGH only if mean score is high, or multiple frames exceed threshold
+                if mean_score >= self.visual_high or (high_count >= 2 and mean_score >= 0.55) or (n_frames == 1 and max_score >= self.visual_high):
                     raw_level = "HIGH"
-                elif max_score >= self.visual_low:
+                elif mean_score >= self.visual_low or high_count >= 1 or max_score >= self.visual_high:
                     raw_level = "MEDIUM"
                 else:
                     raw_level = "LOW"
@@ -130,10 +138,12 @@ class TimelineService:
                 raw_windows.append({
                     "start_s": w_start,
                     "end_s": w_end,
-                    "score": max_score,
+                    "score": mean_score,
+                    "max_score": max_score,
                     "mean_score": mean_score,
+                    "median_score": median_score,
                     "raw_level": raw_level,
-                    "frame_count": len(valid_fake_scores)
+                    "frame_count": n_frames
                 })
             else:
                 # No face detected in this window
@@ -141,7 +151,9 @@ class TimelineService:
                     "start_s": w_start,
                     "end_s": w_end,
                     "score": None,
+                    "max_score": None,
                     "mean_score": None,
+                    "median_score": None,
                     "raw_level": "N/A",
                     "frame_count": 0
                 })
@@ -162,8 +174,8 @@ class TimelineService:
                     i < len(raw_windows) - 1 and raw_windows[i + 1]["score"] is not None and
                     raw_windows[i + 1]["score"] >= self.visual_low
                 )
-                if not (has_prev_qualifying or has_next_qualifying):
-                    # Isolated spike: attenuate to MEDIUM
+                if not (has_prev_qualifying or has_next_qualifying) and len(raw_windows) > 1:
+                    # Isolated spike window: attenuate to MEDIUM
                     level = "MEDIUM"
 
             if level != "N/A" or win["frame_count"] > 0:

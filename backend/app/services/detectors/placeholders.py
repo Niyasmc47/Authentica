@@ -49,9 +49,10 @@ class PlaceholderAudioDetector(AudioDetector):
     async def analyze(
         self,
         audio_path: Optional[Path],
-        video_info: VideoInfo
+        video_info: Optional[VideoInfo] = None
     ) -> AudioResult:
-        if not video_info.audio_available or audio_path is None:
+        audio_available = video_info.audio_available if video_info is not None else True
+        if not audio_available or audio_path is None:
             logger.info("AudioDetector: No audio track present in media file.")
             return AudioResult(
                 available=False,
@@ -85,9 +86,10 @@ class PlaceholderSpeechToText(SpeechToText):
     async def transcribe(
         self,
         audio_path: Optional[Path],
-        video_info: VideoInfo
+        video_info: Optional[VideoInfo] = None
     ) -> SpeechResult:
-        if not video_info.audio_available or audio_path is None:
+        audio_available = video_info.audio_available if video_info is not None else True
+        if not audio_available or audio_path is None:
             logger.info("SpeechToText: No audio track present in media file.")
             return SpeechResult(
                 available=False,

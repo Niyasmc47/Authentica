@@ -415,14 +415,15 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
     async def analyze(
         self,
         audio_path: Optional[Path],
-        video_info: VideoInfo
+        video_info: Optional[VideoInfo] = None
     ) -> AudioResult:
         """
         Executes Stage 1 sliding-window audio spoofing detection.
         """
         start_time = time.perf_counter()
 
-        if not video_info.audio_available or audio_path is None or not audio_path.is_file():
+        audio_available = video_info.audio_available if video_info is not None else True
+        if not audio_available or audio_path is None or not audio_path.is_file():
             logger.info("LocalAudioAntiSpoofDetector: No audio track present in media file.")
             return AudioResult(
                 available=False,

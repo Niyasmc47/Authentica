@@ -52,9 +52,21 @@ class VideoProcessingResult:
         }
 
 
+@dataclass
+class AudioProcessingResult:
+    """Raw processing and extraction results produced for standalone audio."""
+    duration_s: float
+    sample_rate_hz: Optional[int]
+    channels: Optional[int]
+    codec: Optional[str]
+    bitrate_kbps: Optional[float]
+    mime_type: Optional[str]
+    audio_path: Path
+
+
 class VideoProcessor:
     """
-    Core video inspection, frame sampling, and audio extraction service.
+    Core media inspection, video frame sampling, audio extraction, and audio-only processing service.
     Implements real media processing using OpenCV and FFmpeg/FFprobe.
     """
 
@@ -274,3 +286,141 @@ class VideoProcessor:
             frame_idx += 1
 
         return samples
+
+    def probe_media_type(
+        self,
+        media_path: Path
+    ) -> Tuple[str, dict]:
+        """
+        Inspects container streams using ffprobe to classify media as 'VIDEO' or 'AUDIO'.
+        
+        Returns:
+            Tuple of (media_type, ffprobe_metadata) where media_type is 'VIDEO' or 'AUDIO'.
+        """
+        try:
+            probe_data = get_media_metadata_ffprobe(media_path)
+        except MediaExtractionError as e:
+            logger.warning(f"ffprobe metadata extraction failed: {e}")
+            raise CorruptedVideoError(f"Media inspection failed: {str(e)}") from e
+
+        streams = probe_data.get("streams", [])
+        has_video_stream = False
+        has_audio_stream = False
+
+        for st in streams:
+            codec_type = st.get("codec_type")
+            if codec_type == "video":
+                # Exclude attached pictures (album art, poster images in MP3/FLAC/M4A)
+                is_attached_pic = st.get("disposition", {}).get("attached_pic", 0) == 1
+                w = st.get("width") or 0
+                h = st.get("height") or 0
+                if not is_attached_pic and (w > 0 or h > 0):
+                    has_video_stream = True
+            elif codec_type == "audio":
+                has_audio_stream = True
+
+        if has_video_stream:
+            return "VIDEO", probe_data
+        elif has_audio_stream:
+            return "AUDIO", probe_data
+        else:
+            raise CorruptedVideoError("No valid video or audio stream detected in uploaded file.")
+
+    def process_audio(
+        self,
+        audio_path: Path,
+        audio_dir: Path
+    ) -> AudioProcessingResult:
+        """
+        Extracts 16kHz mono WAV audio and metadata for standalone audio uploads.
+        
+        Args:
+            audio_path: Path to the local uploaded audio file.
+            audio_dir: Directory where extracted WAV audio will be written.
+            
+        Returns:
+            AudioProcessingResult with metadata and local artifact path.
+        """
+        logger.info(f"Starting standalone audio processing for: {audio_path.name}")
+        
+        try:
+            probe_data = get_media_metadata_ffprobe(audio_path)
+        except MediaExtractionError as e:
+            raise CorruptedVideoError(f"Audio inspection failed: {str(e)}") from e
+
+        streams = probe_data.get("streams", [])
+        audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
+        if not audio_stream:
+            raise CorruptedVideoError("No readable audio stream found in uploaded file.")
+
+        # Extract format level or stream duration
+        duration_s: Optional[float] = None
+        fmt = probe_data.get("format", {})
+        if "duration" in fmt:
+            try:
+                duration_s = float(fmt["duration"])
+            except (ValueError, TypeError):
+                pass
+
+        if duration_s is None and "duration" in audio_stream:
+            try:
+                duration_s = float(audio_stream["duration"])
+            except (ValueError, TypeError):
+                pass
+
+        sample_rate_hz: Optional[int] = None
+        if "sample_rate" in audio_stream:
+            try:
+                sample_rate_hz = int(audio_stream["sample_rate"])
+            except (ValueError, TypeError):
+                pass
+
+        channels: Optional[int] = audio_stream.get("channels")
+        codec: Optional[str] = audio_stream.get("codec_name")
+        
+        bitrate_kbps: Optional[float] = None
+        bit_rate_raw = fmt.get("bit_rate") or audio_stream.get("bit_rate")
+        if bit_rate_raw:
+            try:
+                bitrate_kbps = round(float(bit_rate_raw) / 1000.0, 1)
+            except (ValueError, TypeError):
+                pass
+
+        mime_type = fmt.get("format_name")
+
+        target_wav = audio_dir / "audio.wav"
+        success = extract_audio_ffmpeg(audio_path, target_wav, sample_rate_hz=16000)
+        if not success or not target_wav.is_file() or target_wav.stat().st_size == 0:
+            raise CorruptedVideoError("Failed to decode uploaded audio file into standard PCM WAV.")
+
+        if duration_s is None or duration_s <= 0:
+            # Fallback to soundfile header read on extracted wav
+            try:
+                import soundfile as sf
+                info = sf.info(str(target_wav.resolve()))
+                duration_s = info.duration
+            except Exception:
+                duration_s = 0.0
+
+        if duration_s <= 0:
+            raise CorruptedVideoError("Unable to determine audio length or track is empty.")
+
+        if duration_s > self.max_duration_s:
+            raise VideoDurationExceededError(
+                f"Audio duration ({duration_s:.1f}s) exceeds maximum allowed limit of {self.max_duration_s:.1f}s."
+            )
+
+        logger.info(
+            f"Audio inspection: codec={codec} | {sample_rate_hz}Hz | {channels}ch | "
+            f"bitrate={bitrate_kbps}kbps | duration={duration_s:.2f}s"
+        )
+
+        return AudioProcessingResult(
+            duration_s=round(duration_s, 2),
+            sample_rate_hz=sample_rate_hz,
+            channels=channels,
+            codec=codec,
+            bitrate_kbps=bitrate_kbps,
+            mime_type=mime_type,
+            audio_path=target_wav,
+        )

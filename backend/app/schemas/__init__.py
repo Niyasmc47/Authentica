@@ -15,6 +15,7 @@ from .evidence import (
     EvidenceMetadata,
     EvidenceModalityResult,
     MediaAssessment,
+    ModalityStatistics,
     ModelEvidenceItem,
     ProvenanceResult,
 )

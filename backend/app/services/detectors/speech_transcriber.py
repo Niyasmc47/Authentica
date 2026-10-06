@@ -94,14 +94,15 @@ class FasterWhisperTranscriber(SpeechToText):
     async def transcribe(
         self,
         audio_path: Optional[Path],
-        video_info: VideoInfo
+        video_info: Optional[VideoInfo] = None
     ) -> SpeechResult:
         """
         Executes speech-to-text transcription on the extracted WAV file.
         """
         start_time = time.perf_counter()
 
-        if not video_info.audio_available or audio_path is None or not audio_path.is_file():
+        audio_available = video_info.audio_available if video_info is not None else True
+        if not audio_available or audio_path is None or not audio_path.is_file():
             logger.info("FasterWhisperTranscriber: No audio stream or audio file present.")
             return SpeechResult(
                 available=False,

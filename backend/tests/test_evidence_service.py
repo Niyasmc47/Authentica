@@ -54,7 +54,9 @@ def test_evidence_service_levels():
     matrix = service.build_matrix(video_info, visual_high, audio_low, prov, rel)
 
     assert matrix.visual.level == "HIGH"
-    assert matrix.visual.models[0].score == 0.85
+    assert matrix.visual.models[0].score == 0.815
+    assert matrix.visual.statistics is not None
+    assert matrix.visual.statistics.max_score == 0.85
     assert matrix.visual.models[0].label == "model score (not a probability)"
 
     assert matrix.audio.level == "LOW"

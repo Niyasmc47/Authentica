@@ -17,6 +17,15 @@ class ModelEvidenceItem(BaseModel):
     )
 
 
+class ModalityStatistics(BaseModel):
+    """Robust statistical metrics across frames/windows for calibrated decisions."""
+    mean_score: Optional[float] = Field(None, description="Arithmetic mean score across evaluated items")
+    median_score: Optional[float] = Field(None, description="Median score across evaluated items")
+    max_score: Optional[float] = Field(None, description="Maximum observed score (diagnostic only)")
+    high_ratio: Optional[float] = Field(None, description="Ratio of frames or windows exceeding high threshold")
+    consecutive_high_count: int = Field(0, description="Maximum count of consecutive high windows")
+
+
 class EvidenceModalityResult(BaseModel):
     """Normalized evidence for an individual sensory modality (visual or audio)."""
     level: str = Field(
@@ -26,6 +35,10 @@ class EvidenceModalityResult(BaseModel):
     models: List[ModelEvidenceItem] = Field(
         default_factory=list,
         description="List of model outputs contributing to this modality"
+    )
+    statistics: Optional[ModalityStatistics] = Field(
+        None,
+        description="Robust statistical metrics preventing single-observation false positives"
     )
 
 
@@ -58,12 +71,13 @@ class ProvenanceResult(BaseModel):
 
 class EvidenceMetadata(BaseModel):
     """Normalized media quality and container metrics."""
-    width: int
-    height: int
-    duration_s: float
-    fps: float
-    frames_sampled: int
-    audio_available: bool
+    media_type: str = Field("VIDEO", description="Input media category: 'VIDEO' | 'AUDIO'")
+    width: Optional[int] = Field(None, description="Video width in pixels (for VIDEO)")
+    height: Optional[int] = Field(None, description="Video height in pixels (for VIDEO)")
+    duration_s: float = Field(..., description="Total duration in seconds")
+    fps: Optional[float] = Field(None, description="Frame rate (for VIDEO)")
+    frames_sampled: Optional[int] = Field(None, description="Number of sampled frames (for VIDEO)")
+    audio_available: bool = Field(True, description="True if audio stream exists")
 
 
 class EvidenceMatrix(BaseModel):

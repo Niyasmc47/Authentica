@@ -20,55 +20,71 @@ class FraudIntentEngine:
     from timestamped Whisper transcript segments.
     """
 
-    # Category regex patterns
+    # Category regex patterns with contextual precision (financial words alone do not trigger PAYMENT_CREDENTIAL)
     CATEGORY_PATTERNS = {
         "AUTHORITY": [
-            r"\b(?:i am|this is|speaking as)\s+(?:the\s+)?(?:project\s+|senior\s+|general\s+|regional\s+)?(?:ceo|cfo|executive|director|manager|boss|chief|president)\b",
-            r"\b(?:police|fbi|cia|interpol|sheriff|detective|officer|marshal|law enforcement|federal agent)\b",
-            r"\b(?:irs|tax department|revenue service|customs|court|judge|legal department|attorney general)\b",
-            r"\b(?:bank manager|security department|fraud department|technical support|it support|helpdesk)\b",
+            (r"\b(?:i am|this is|speaking as)\s+(?:the\s+|your\s+|our\s+|an?\s+)?(?:project\s+|senior\s+|general\s+|regional\s+|acting\s+)?(?:ceo|cfo|executive|director|manager|boss|chief|president)\b", "Executive or organizational authority claim"),
+            (r"\b(?:police|fbi|cia|interpol|sheriff|detective|officer|marshal|law enforcement|federal agent)\b", "Law enforcement authority claim"),
+            (r"\b(?:irs|tax department|revenue service|customs|court|judge|legal department|attorney general)\b", "Government/legal authority claim"),
+            (r"\b(?:bank manager|security department|fraud department|technical support|it support|helpdesk)\b", "Institutional security/support authority claim"),
         ],
         "URGENCY": [
-            r"\b(?:immediately|right now|urgently|hurry|asap|without delay|at once)\b",
-            r"\b(?:within\s+\d+\s+(?:minutes?|hours?)|before\s+it(?:'s|\s+is)\s+too\s+late|time\s+is\s+running\s+out)\b",
-            r"\b(?:account\s+will\s+be\s+blocked|funds\s+frozen|suspended\s+today|critical\s+deadline)\b",
+            (r"\b(?:immediately|right now|urgently|hurry|asap|without delay|at once)\b", "Immediate urgency directive"),
+            (r"\b(?:within\s+\d+\s+(?:minutes?|hours?)|before\s+it(?:'s|\s+is)\s+too\s+late|time\s+is\s+running\s+out)\b", "Critical time deadline pressure"),
+            (r"\b(?:account\s+will\s+be\s+blocked|funds\s+frozen|suspended\s+today|critical\s+deadline)\b", "Impending account suspension/block pressure"),
         ],
         "PAYMENT_CREDENTIAL": [
-            r"\b(?:wire\s+transfer|send\s+(?:the\s+)?money|transfer\s+funds|bitcoin|crypto|usdt|ethereum|gift\s*cards?)\b",
-            r"\b(?:otp|one[- ]time\s+pass(?:code|word)?|verification\s+code|2fa\s+code|security\s+code)\b",
-            r"\b(?:cvv|card\s+number|pin\s+number|bank\s+account|routing\s+number|credentials|password)\b",
-            r"\b(?:western\s+union|moneygram|apple\s+gift\s*cards?|google\s+play\s*cards?|vanilla\s*visa)\b",
+            # Direct payment directives (financial words alone do NOT match)
+            (r"\b(?:please\s+)?(?:send|transfer|wire|pay|deposit|remit)\s+(?:me\s+|us\s+|the\s+|this\s+|my\s+|our\s+|to\s+(?:the|this|my|our)\s+)?\s*(?:funds|money|cash|[\$₹€£]|\d+)\b", "Directed financial payment demand"),
+            (r"\b(?:i\s+need\s+you\s+to|you\s+(?:must|need\s+to|have\s+to))\s+(?:send|transfer|wire|pay|deposit)\s+(?:me\s+|us\s+|the\s+)?\s*(?:funds|money|cash|[\$₹€£]|\d+)\b", "Direct order to transfer funds"),
+            (r"\b(?:can\s+you|could\s+you)\s+(?:send|transfer|wire|pay|deposit)\s+(?:me\s+|us\s+)?\s*(?:money|funds|cash|[\$₹€£]|\d+)\b", "Directed financial payment request"),
+            (r"\b(?:send|transfer|wire)\s+(?:me\s+)?(?:[₹\$€£]|\d+[\d,]*\s*(?:rupees|dollars|inr|usd|cash|funds|money))\b", "Specific monetary amount extraction request"),
+            (r"\b(?:transfer\s+funds\s+immediately|wire\s+the\s+funds|transfer\s+to\s+the\s+new\s+account)\b", "Explicit fund transfer instruction"),
+            # Credential extraction
+            (r"\b(?:share|give|tell|send|provide|read\s+out)\s+(?:your\s+|the\s+)?(?:otp|passcode|password|pin|cvv|credentials|bank\s+details|card\s+number)\b", "Direct credential/OTP extraction demand"),
+            (r"\b(?:one[- ]time\s+pass(?:code|word)?|2fa\s+code|verification\s+code|security\s+code)\b", "Authentication token/OTP reference"),
+            # Shady payment mechanisms
+            (r"\b(?:apple\s+gift\s*cards?|google\s+play\s*cards?|vanilla\s*visa|western\s+union|moneygram)\b", "Untraceable gift card/remittance demand"),
+            (r"\b(?:buy\s+gift\s*cards|pay\s+in\s+bitcoin|pay\s+with\s+crypto|transfer\s+usdt)\b", "Crypto/gift card payment demand"),
+            # Routing changes
+            (r"\b(?:update|change)\s+(?:the\s+)?(?:bank|invoice|beneficiary|routing)\s+(?:details|number|destination|account)\b", "Payment beneficiary account modification"),
         ],
         "SECRECY": [
-            r"\b(?:don'?t\s+tell|do\s+not\s+tell|keep\s+this\s+(?:between\s+us|confidential|secret|private|quiet))\b",
-            r"\b(?:do\s+not\s+(?:call|contact|mention|discuss)\s+(?:anyone|the\s+office|colleagues|family|boss))\b",
-            r"\b(?:off\s+the\s+record|strictly\s+confidential|top\s+secret|between\s+you\s+and\s+me)\b",
+            (r"\b(?:don'?t\s+tell|do\s+not\s+tell|keep\s+this\s+(?:between\s+us|confidential|secret|private|quiet))\b", "Demand for secrecy or non-disclosure"),
+            (r"\b(?:do\s+not\s+(?:call|contact|mention|discuss)\s+(?:anyone|the\s+office|colleagues|family|boss))\b", "Instruction to isolate victim from advisors"),
+            (r"\b(?:off\s+the\s+record|strictly\s+confidential|top\s+secret|between\s+you\s+and\s+me)\b", "Claim of confidential/secret dealing"),
         ],
         "CHANNEL_IDENTITY_CHANGE": [
-            r"\b(?:lost\s+(?:my\s+)?(?:phone|access)|new\s+(?:temporary\s+)?(?:number|phone)|using\s+a\s+different\s+phone)\b",
-            r"\b(?:text\s+me\s+on\s+whatsapp|message\s+me\s+on\s+telegram|this\s+is\s+my\s+personal\s+(?:number|cell))\b",
-            r"\b(?:changed\s+my\s+number|reach\s+me\s+here\s+instead)\b",
+            (r"\b(?:lost\s+(?:my\s+)?(?:phone|access)|new\s+(?:temporary\s+)?(?:number|phone)|using\s+a\s+different\s+phone)\b", "Claim of lost phone or temporary number"),
+            (r"\b(?:text\s+me\s+on\s+whatsapp|message\s+me\s+on\s+telegram|this\s+is\s+my\s+personal\s+(?:number|cell))\b", "Diversion to personal/unmonitored messaging app"),
+            (r"\b(?:changed\s+my\s+number|reach\s+me\s+here\s+instead)\b", "Out-of-band communication switch"),
         ],
         "THREAT_PRESSURE": [
-            r"\b(?:arrest\s+warrant|face\s+arrest|police\s+will\s+arrive|lawsuit|legal\s+action)\b",
-            r"\b(?:penalty|fine|disciplinary\s+action|terminated|fired|suspended\s+permanently)\b",
-            r"\b(?:your\s+account\s+has\s+been\s+compromised|illegal\s+activities\s+detected)\b",
+            (r"\b(?:arrest\s+warrant|face\s+arrest|police\s+will\s+arrive|lawsuit|legal\s+action)\b", "Threat of immediate arrest or legal coercion"),
+            (r"\b(?:penalty|fine|disciplinary\s+action|terminated|fired|suspended\s+permanently)\b", "Threat of employment or financial penalty"),
+            (r"\b(?:your\s+account\s+has\s+been\s+compromised|illegal\s+activities\s+detected)\b", "Coercive claim of illegal activity detection"),
         ],
         "TOO_GOOD_TO_BE_TRUE": [
-            r"\b(?:guaranteed\s+(?:returns?|profit|income)|100x|double\s+your\s+money|lottery\s+winner)\b",
-            r"\b(?:exclusive\s+investment|claim\s+your\s+prize|free\s+crypto|risk[- ]free\s+opportunity)\b",
+            (r"\b(?:guaranteed\s+(?:returns?|profit|income)|100x|double\s+your\s+money|lottery\s+winner)\b", "Unrealistic guaranteed return / prize promise"),
+            (r"\b(?:exclusive\s+investment|claim\s+your\s+prize|free\s+crypto|risk[- ]free\s+opportunity)\b", "Fraudulent investment/prize claim"),
         ],
         "REMOTE_ACCESS_LINKS": [
-            r"\b(?:anydesk|teamviewer|quicksupport|ultraviewer|zoho\s+assist|remote\s+desktop)\b",
-            r"\b(?:install\s+(?:this\s+)?(?:app|software|tool|file)|download\s+the\s+attached)\b",
-            r"\b(?:click\s+(?:the\s+)?(?:link|button)|go\s+to\s+this\s+(?:website|url)|share\s+your\s+screen)\b",
+            (r"\b(?:anydesk|teamviewer|quicksupport|ultraviewer|zoho\s+assist|remote\s+desktop)\b", "Remote control software installation request"),
+            (r"\b(?:install\s+(?:this\s+)?(?:app|software|tool|file)|download\s+the\s+attached)\b", "Instruction to download or install external software"),
+            (r"\b(?:click\s+(?:the\s+)?(?:link|button)|go\s+to\s+this\s+(?:website|url)|share\s+your\s+screen)\b", "Instruction to click unverified link or share screen"),
         ],
     }
 
     # Action directive patterns (action_name, pattern)
     ACTION_PATTERNS = [
-        ("SEND_MONEY", r"\b(?:send|pay|deposit|remit)\s+(?:me|the|us|\$|\d+)?\s*(?:money|funds|cash|crypto|bitcoin|amount|cards?)\b"),
-        ("TRANSFER_MONEY", r"\b(?:transfer|wire)\s+(?:the\s+)?(?:funds?|money|balance|amount|sum)\b"),
+        ("SEND_MONEY", r"\b(?:please\s+)?(?:send|pay|deposit|remit)\s+(?:me\s+|us\s+|the\s+|this\s+|my\s+|our\s+|to\s+(?:the|this|my|our)\s+)?\s*(?:money|funds|cash|crypto|bitcoin|amount|cards?|[₹\$€£]|\d+)\b"),
+        ("SEND_MONEY", r"\b(?:i\s+need\s+you\s+to|you\s+(?:must|need\s+to|have\s+to))\s+(?:send|pay|deposit)\s+(?:me\s+|us\s+|the\s+)?\s*(?:funds|money)\b"),
+        ("SEND_MONEY", r"\b(?:can\s+you|could\s+you)\s+(?:send|pay|deposit)\s+(?:me\s+|us\s+)?\s*(?:money|funds|cash|[\$₹€£]|\d+)\b"),
+        ("SEND_MONEY", r"\b(?:send|pay|deposit)\s+(?:me\s+)?(?:[₹\$€£]|\d+[\d,]*\s*(?:rupees|dollars|inr|usd|cash|funds|money))\b"),
+        ("TRANSFER_MONEY", r"\b(?:please\s+)?(?:transfer|wire)\s+(?:me\s+|us\s+|the\s+|this\s+|my\s+|our\s+)?\s*(?:funds?|money|balance|amount|sum|[₹\$€£]|\d+)\b"),
+        ("TRANSFER_MONEY", r"\b(?:i\s+need\s+you\s+to|you\s+(?:must|need\s+to|have\s+to))\s+(?:transfer|wire)\s+(?:the\s+)?(?:funds?|money|sum|amount|[₹\$€£]|\d+)\b"),
+        ("TRANSFER_MONEY", r"\b(?:transfer|wire)\s+(?:funds?|money)\s+immediately\b"),
+        ("TRANSFER_MONEY", r"\b(?:transfer|wire)\s+(?:to\s+(?:the|this)\s+new\s+account)\b"),
         ("SHARE_OTP", r"\b(?:give|send|tell|share|read\s+out|provide)\s+(?:me\s+)?(?:the\s+|your\s+|that\s+)?(?:otp\s+verification\s+code|otp\s+code|otp|one[- ]time\s+pass(?:code|word)?|verification\s+code|2fa\s+code)\b"),
         ("SHARE_PASSWORD", r"\b(?:give|send|tell|share|provide)\s+(?:me\s+)?(?:your\s+|the\s+)?(?:password|pin|credentials|login)\b"),
         ("SHARE_BANK_DETAILS", r"\b(?:share|give|send|provide)\s+(?:your\s+|the\s+)?(?:bank\s+details|account\s+details|card\s+number|cvv)\b"),
@@ -82,22 +98,19 @@ class FraudIntentEngine:
 
     # Patterns indicating educational / news / awareness context
     NEWS_AWARENESS_PATTERNS = [
-        r"\b(?:beware\s+of|be\s+careful\s+of|watch\s+out\s+for|scammers?\s+(?:are|often|use|try|will|trick|ask))\b",
-        r"\b(?:in\s+this\s+(?:report|video|news|segment)|news\s+anchor|reporting\s+live|documentary)\b",
+        r"\b(?:beware\s+of|be\s+careful\s+of|watch\s+out\s+for|scammers?\s+(?:are|often|use|try|will|trick|ask|target))\b",
+        r"\b(?:in\s+this\s+(?:report|video|news|segment|story|documentary)|news\s+anchor|reporting\s+live)\b",
         r"\b(?:cybersecurity\s+tip|safety\s+warning|fraud\s+awareness|psa|public\s+service\s+announcement)\b",
-        r"\b(?:police\s+warn|officials\s+caution|fbi\s+warns|victims\s+were\s+targeted|how\s+scams?\s+work)\b",
+        r"\b(?:police\s+warn(?:ed)?|officials\s+caution|fbi\s+warns|victims\s+were\s+targeted|how\s+scams?\s+work|scam\s+alert)\b",
+        r"\b(?:video\s+is\s+about\s+how\s+scammers|discussing\s+how\s+scammers)\b",
     ]
 
     def analyze(self, speech_result: Optional[SpeechResult]) -> FraudResult:
-        """
-        Analyze transcript segments to detect fraud intent and social engineering tactics.
-        """
+        """Analyze transcript segments to detect fraud intent and social engineering tactics."""
         return self.evaluate(speech_result)
 
     def evaluate(self, speech_result: Optional[SpeechResult]) -> FraudResult:
-        """
-        Evaluate transcript segments to detect fraud intent and social engineering tactics.
-        """
+        """Evaluate transcript segments to detect fraud intent and social engineering tactics."""
         if not speech_result or not speech_result.available or not speech_result.segments:
             logger.info("FraudIntentEngine: No speech transcript segments available to analyze.")
             return FraudResult(
@@ -113,13 +126,13 @@ class FraudIntentEngine:
         # 1. Detect educational / news / reported-speech context
         is_news_context = self._detect_news_context(full_transcript)
 
-        # 2. Match Categories across segments
+        # 2. Match Categories across segments with reason annotations
         categories_found: List[FraudCategoryEvidence] = []
-        for cat_name, patterns in self.CATEGORY_PATTERNS.items():
+        for cat_name, pattern_tuples in self.CATEGORY_PATTERNS.items():
             evidence_items: List[FraudEvidenceItem] = []
             for seg in segments:
                 text_clean = seg.text.strip()
-                for pat in patterns:
+                for pat, reason_desc in pattern_tuples:
                     matches = list(re.finditer(pat, text_clean, re.IGNORECASE))
                     for m in matches:
                         evidence_items.append(
@@ -127,10 +140,10 @@ class FraudIntentEngine:
                                 phrase=m.group(0),
                                 start_s=seg.start_s,
                                 end_s=seg.end_s,
+                                reason=reason_desc,
                             )
                         )
             if evidence_items:
-                # Severity determination per category
                 severity = "HIGH" if cat_name in ("PAYMENT_CREDENTIAL", "THREAT_PRESSURE", "REMOTE_ACCESS_LINKS") else "MEDIUM"
                 categories_found.append(
                     FraudCategoryEvidence(
@@ -147,14 +160,16 @@ class FraudIntentEngine:
             for action_name, pat in self.ACTION_PATTERNS:
                 matches = list(re.finditer(pat, text_clean, re.IGNORECASE))
                 for m in matches:
-                    requested_actions.append(
-                        FraudRequestedAction(
-                            action=action_name,
-                            phrase=m.group(0),
-                            start_s=seg.start_s,
-                            end_s=seg.end_s,
+                    # Prevent duplicate actions on same segment
+                    if not any(a.action == action_name and a.start_s == seg.start_s for a in requested_actions):
+                        requested_actions.append(
+                            FraudRequestedAction(
+                                action=action_name,
+                                phrase=m.group(0),
+                                start_s=seg.start_s,
+                                end_s=seg.end_s,
+                            )
                         )
-                    )
 
         # 4. Multi-signal scoring & determination of raw risk level
         raw_level = self._compute_fraud_level(categories_found, requested_actions)
@@ -203,18 +218,20 @@ class FraudIntentEngine:
         has_threat = "THREAT_PRESSURE" in cat_names
         has_secrecy = "SECRECY" in cat_names
         has_remote = "REMOTE_ACCESS_LINKS" in cat_names
+        has_channel_change = "CHANNEL_IDENTITY_CHANGE" in cat_names
         has_too_good = "TOO_GOOD_TO_BE_TRUE" in cat_names
 
         # Critical Direct Action combinations -> HIGH
-        # Any direct extraction action (Send money, share OTP, remote install) combined with pressure or authority
-        if has_direct_action:
-            if has_payment_creds or has_remote:
+        # Explicit high-risk credential theft or remote control directives are inherently HIGH
+        if action_names & {"SHARE_OTP", "SHARE_PASSWORD", "SHARE_BANK_DETAILS", "INSTALL_REMOTE_ACCESS"}:
+            return "HIGH"
+
+        # Direct money extraction combined with social engineering coercion -> HIGH
+        if action_names & {"SEND_MONEY", "TRANSFER_MONEY"}:
+            if has_authority or has_urgency or has_threat or has_secrecy or has_channel_change or has_too_good:
                 return "HIGH"
-            if has_authority or has_urgency or has_threat or has_secrecy:
-                return "HIGH"
-            # Explicit high-risk actions alone
-            if action_names & {"SEND_MONEY", "TRANSFER_MONEY", "SHARE_OTP", "SHARE_PASSWORD", "SHARE_BANK_DETAILS", "INSTALL_REMOTE_ACCESS"}:
-                return "HIGH"
+            # Casual money request without social engineering pressure -> MEDIUM
+            return "MEDIUM"
 
         # Strong Social Engineering combos without explicit action regex trigger -> HIGH
         if has_threat and (has_payment_creds or has_urgency):
@@ -225,12 +242,11 @@ class FraudIntentEngine:
             return "HIGH"
 
         # Medium Risk indicators
-        # Multi-category suspicious combinations without direct action demands
         if len(cat_names) >= 2:
             return "MEDIUM"
         if has_payment_creds or has_too_good or has_remote or has_threat:
             return "MEDIUM"
-        if has_authority or has_urgency or has_secrecy or "CHANNEL_IDENTITY_CHANGE" in cat_names:
+        if has_authority or has_urgency or has_secrecy or has_channel_change:
             return "MEDIUM"
 
         return "LOW"

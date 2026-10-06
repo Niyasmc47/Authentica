@@ -79,18 +79,40 @@ class SpeechResult(BaseModel):
     segments: List[SpeechSegment] = Field(default_factory=list, description="Transcribed speech segments")
 
 
+class InputInfo(BaseModel):
+    """Uploaded input media classification."""
+    media_type: str = Field(..., description="Media category: 'VIDEO' | 'AUDIO'")
+
+
+class AudioMetadata(BaseModel):
+    """Metadata extracted from standalone uploaded audio file."""
+    filename: str = Field(..., description="Original filename of the uploaded audio")
+    sha256: str = Field(..., description="SHA-256 cryptographic hash of the audio file")
+    duration_s: float = Field(..., description="Total duration in seconds")
+    sample_rate_hz: Optional[int] = Field(None, description="Audio sample rate in Hz")
+    channels: Optional[int] = Field(None, description="Number of audio channels")
+    codec: Optional[str] = Field(None, description="Audio codec format")
+    bitrate_kbps: Optional[float] = Field(None, description="Audio bitrate in kbps")
+    mime_type: Optional[str] = Field(None, description="Detected or declared MIME type")
+
+
 class AnalysisResponse(BaseModel):
     """
-    Unified Stage 1 + Stage 2 Analysis Response contract.
+    Unified Stage 1 + Stage 2 + Stage 3 Analysis Response contract.
     Contains raw sensor observations, synthesized evidence matrix, reliability gate,
-    temporal timeline events, and final media assessment.
+    temporal timeline events, fraud intent findings, and final media assessment.
+    Supports both VIDEO and AUDIO media inputs.
     """
     id: str = Field(..., description="Unique UUID for this analysis request")
     status: str = Field(..., description="Overall analysis status: completed | partial | error")
     created_at: str = Field(..., description="ISO 8601 creation timestamp")
     
+    # Input media classification
+    input: InputInfo = Field(default_factory=lambda: InputInfo(media_type="VIDEO"), description="Input media classification")
+    
     # Stage 1: Raw media metadata and sensory observations
-    video: VideoInfo = Field(..., description="Extracted video metadata")
+    video: Optional[VideoInfo] = Field(None, description="Extracted video metadata (for VIDEO)")
+    audio_metadata: Optional[AudioMetadata] = Field(None, description="Extracted audio metadata (for standalone AUDIO)")
     visual: VisualResult = Field(default_factory=VisualResult, description="Visual deepfake detector output")
     audio: AudioResult = Field(default_factory=AudioResult, description="Audio deepfake detector output")
     speech: SpeechResult = Field(default_factory=SpeechResult, description="Speech-to-text output")

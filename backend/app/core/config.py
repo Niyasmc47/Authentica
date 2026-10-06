@@ -15,13 +15,31 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_MB: int = 100
     MAX_DURATION_SECONDS: float = 90.0
     
-    ALLOWED_EXTENSIONS: Set[str] = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+    ALLOWED_EXTENSIONS: Set[str] = {
+        ".mp4", ".avi", ".mov", ".mkv", ".webm",
+        ".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac", ".wma"
+    }
     ALLOWED_MIME_TYPES: Set[str] = {
         "video/mp4",
         "video/x-msvideo",
         "video/quicktime",
         "video/x-matroska",
         "video/webm",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/wave",
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/mp4",
+        "audio/x-m4a",
+        "audio/m4a",
+        "audio/flac",
+        "audio/x-flac",
+        "audio/ogg",
+        "audio/vorbis",
+        "audio/aac",
+        "audio/x-aac",
+        "audio/webm",
         "application/octet-stream",
     }
     

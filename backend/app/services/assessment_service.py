@@ -122,7 +122,10 @@ class AssessmentService:
         elif matrix.visual.level == "LOW":
             reasons.append("Visual detector found no significant synthetic facial artifacts in analyzed frames.")
         elif matrix.visual.level == "N/A":
-            reasons.append("Visual facial manipulation detection was not applicable (no faces detected or detector unavailable).")
+            if matrix.metadata.media_type == "AUDIO":
+                reasons.append("Visual facial manipulation detection is not applicable for audio-only media.")
+            else:
+                reasons.append("Visual facial manipulation detection was not applicable (no faces detected or detector unavailable).")
 
         # 3. Audio Modality
         if matrix.audio.level == "HIGH":
