@@ -74,3 +74,10 @@ backend/temp/
 .idea/
 *.swp
 *.swo
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+Extension/node_modules/
+.npm
+
