@@ -1,6 +1,18 @@
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
+from app.schemas.evidence import (
+    EvidenceMatrix,
+    EvidenceMetadata,
+    EvidenceModalityResult,
+    MediaAssessment,
+    ModelEvidenceItem,
+    ProvenanceResult,
+)
+from app.schemas.fraud import FraudResult
+from app.schemas.reliability import ReliabilityResult
+from app.schemas.timeline import TimelineEvent
+
 
 class VideoInfo(BaseModel):
     """Metadata extracted from the uploaded video."""
@@ -68,14 +80,31 @@ class SpeechResult(BaseModel):
 
 
 class AnalysisResponse(BaseModel):
-    """Structured Stage 1 Analysis Result shared data contract."""
+    """
+    Unified Stage 1 + Stage 2 Analysis Response contract.
+    Contains raw sensor observations, synthesized evidence matrix, reliability gate,
+    temporal timeline events, and final media assessment.
+    """
     id: str = Field(..., description="Unique UUID for this analysis request")
     status: str = Field(..., description="Overall analysis status: completed | partial | error")
     created_at: str = Field(..., description="ISO 8601 creation timestamp")
+    
+    # Stage 1: Raw media metadata and sensory observations
     video: VideoInfo = Field(..., description="Extracted video metadata")
     visual: VisualResult = Field(default_factory=VisualResult, description="Visual deepfake detector output")
     audio: AudioResult = Field(default_factory=AudioResult, description="Audio deepfake detector output")
     speech: SpeechResult = Field(default_factory=SpeechResult, description="Speech-to-text output")
+    
+    # Stage 2: Evidence & Trust Engine outputs
+    reliability: Optional[ReliabilityResult] = Field(None, description="Reliability Gate assessment")
+    evidence: Optional[EvidenceMatrix] = Field(None, description="Synthesized multi-modal Evidence Matrix")
+    timeline: List[TimelineEvent] = Field(default_factory=list, description="Aggregated chronological timeline events")
+    assessment: Optional[MediaAssessment] = Field(None, description="Media assessment verdict")
+    explanation: List[str] = Field(default_factory=list, description="Evidence-grounded human explanations")
+    limitations: List[str] = Field(default_factory=list, description="Systemic and model-specific limitations")
+    
+    # Stage 3: Fraud Intent Engine outputs
+    fraud: Optional[FraudResult] = Field(None, description="Fraud intent & social-engineering risk findings")
 
 
 class HealthResponse(BaseModel):

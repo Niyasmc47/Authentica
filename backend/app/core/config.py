@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import List, Set
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
@@ -7,25 +8,46 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Authentica Backend"
-    VERSION: str = "1.0.0"
+    VERSION: str = "2.0.0"
     API_V1_STR: str = "/api"
     
-    # Validation settings (configurable via environment variables)
+    # Stage 1: Validation settings (configurable via environment variables)
     MAX_FILE_SIZE_MB: int = 100
     MAX_DURATION_SECONDS: float = 90.0
     
-    ALLOWED_EXTENSIONS: set[str] = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
-    ALLOWED_MIME_TYPES: set[str] = {
+    ALLOWED_EXTENSIONS: Set[str] = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+    ALLOWED_MIME_TYPES: Set[str] = {
         "video/mp4",
         "video/x-msvideo",
         "video/quicktime",
         "video/x-matroska",
         "video/webm",
-        "application/octet-stream",  # often sent by generic HTTP clients for binary video
+        "application/octet-stream",
     }
     
     # Video sampling settings
     FRAME_SAMPLE_FPS: float = 1.0  # Sample approx 1 frame per second
+    
+    # Stage 2: Reliability Gate Thresholds
+    RELIABILITY_MIN_WIDTH: int = 360
+    RELIABILITY_MIN_HEIGHT: int = 360
+    MIN_FACE_DETECTION_RATE: float = 0.30
+    MIN_AUDIO_DURATION: float = 3.0
+    
+    # Stage 2: Evidence Level Prototype Thresholds
+    # Prototype thresholds subject to calibration on team evaluation benchmarks
+    VISUAL_LOW_THRESHOLD: float = 0.30
+    VISUAL_HIGH_THRESHOLD: float = 0.70
+    AUDIO_LOW_THRESHOLD: float = 0.30
+    AUDIO_HIGH_THRESHOLD: float = 0.70
+    
+    # Stage 2: Timeline Aggregation Settings
+    TIMELINE_WINDOW_DURATION_S: float = 3.0
+    
+    # Stage 2: Trusted C2PA Signers List
+    TRUSTED_C2PA_SIGNERS: List[str] = [
+        "Adobe", "Truepic", "BBC", "Sony", "Nikon", "Leica", "Microsoft", "C2PA Test Signer"
+    ]
     
     # Temporary workspace root directory
     TEMP_DIR: Path = Path(__file__).resolve().parent.parent.parent / "temp"
@@ -34,7 +56,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     
     # CORS
-    CORS_ORIGINS: list[str] = ["*"]
+    CORS_ORIGINS: List[str] = ["*"]
 
     model_config = SettingsConfigDict(
         env_file=".env",

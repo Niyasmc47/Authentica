@@ -379,8 +379,25 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
 
     def predict_window(self, audio_slice: np.ndarray) -> float:
         """
-        Runs model inference on a single audio window.
-        Returns spoof_score in [0.0, 1.0].
+        Runs model inference on a single audio window using AASIST.
+        
+        AASIST / ASVspoof 2019 Logical Access (LA) Label Protocol:
+          - Target 0: 'spoof' (Synthetic voice, cloned voice, or replay attack)
+          - Target 1: 'bonafide' (Genuine, authentic human speech)
+          
+        Classification Head:
+          - Output logits shape: [batch_size, 2]
+          - logits[0]: Spoof / synthetic voice logit
+          - logits[1]: Bonafide / genuine speech logit
+          
+        Score Polarity:
+          - spoof_score = probs[0] in [0.0, 1.0]
+          - Increases monotonically with spoof / synthetic likelihood:
+            - ~1.0: High likelihood of synthetic / spoofed voice
+            - ~0.0: High likelihood of genuine / bonafide human voice
+            
+        Returns:
+            spoof_score (float in [0.0, 1.0])
         """
         if self.model is None:
             raise RuntimeError("AASIST model is not loaded. Call load() first.")
@@ -389,8 +406,9 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
         with torch.no_grad():
             logits = self.model(tensor)
             probs = torch.softmax(logits, dim=-1)[0]
-            # Class 0 = Bonafide (Real), Class 1 = Spoof (Synthetic/Fake)
-            spoof_score = round(float(probs[1].item()), 4)
+            # In official AASIST architecture & ASVspoof 2019 protocol:
+            # Index 0 = Spoof (Synthetic/Fake), Index 1 = Bonafide (Real/Genuine)
+            spoof_score = round(float(probs[0].item()), 4)
 
         return spoof_score
 

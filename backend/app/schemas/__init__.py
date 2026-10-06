@@ -10,6 +10,16 @@ from .analysis import (
     VisualFrameResult,
     VisualResult,
 )
+from .evidence import (
+    EvidenceMatrix,
+    EvidenceMetadata,
+    EvidenceModalityResult,
+    MediaAssessment,
+    ModelEvidenceItem,
+    ProvenanceResult,
+)
+from .reliability import ReliabilityResult
+from .timeline import TimelineEvent
 
 __all__ = [
     "AnalysisResponse",
@@ -22,4 +32,12 @@ __all__ = [
     "VideoInfo",
     "VisualFrameResult",
     "VisualResult",
+    "ReliabilityResult",
+    "TimelineEvent",
+    "ModelEvidenceItem",
+    "EvidenceModalityResult",
+    "ProvenanceResult",
+    "EvidenceMetadata",
+    "EvidenceMatrix",
+    "MediaAssessment",
 ]

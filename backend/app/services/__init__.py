@@ -5,6 +5,11 @@ from .analysis_service import (
     InvalidMimeTypeError,
     ValidationException,
 )
+from .assessment_service import AssessmentService
+from .c2pa_service import C2PAService
+from .evidence_service import EvidenceService
+from .reliability_service import ReliabilityService
+from .timeline_service import TimelineService
 from .video_processor import (
     CorruptedVideoError,
     VideoDurationExceededError,
@@ -24,4 +29,9 @@ __all__ = [
     "CorruptedVideoError",
     "VideoDurationExceededError",
     "VideoProcessingResult",
+    "C2PAService",
+    "ReliabilityService",
+    "EvidenceService",
+    "TimelineService",
+    "AssessmentService",
 ]
