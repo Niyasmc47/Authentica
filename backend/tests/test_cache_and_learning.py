@@ -156,3 +156,21 @@ def test_direct_threat_speech_not_downgraded_by_news_context():
     fraud = fraud_engine.evaluate(speech_result)
     assert fraud.level == "HIGH"
     assert fraud.news_context_downgrade is False
+
+
+def test_speech_result_transcript_attribute_safety():
+    """Verify SpeechResult has safe transcript access without raising AttributeError."""
+    res = SpeechResult(
+        available=True,
+        model="whisper",
+        status="completed",
+        segments=[
+            SpeechSegment(start_s=0.0, end_s=1.0, text="Hello"),
+            SpeechSegment(start_s=1.0, end_s=2.0, text="world")
+        ]
+    )
+    # Both attribute access and getattr must succeed
+    assert hasattr(res, "transcript")
+    # transcript field is present
+    assert res.transcript is None or isinstance(res.transcript, str)
+

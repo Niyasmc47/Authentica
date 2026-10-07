@@ -94,6 +94,7 @@ class SpeechResult(BaseModel):
     language: Optional[str] = Field(None, description="Detected or configured spoken language code (e.g., 'en')")
     processing_time_s: Optional[float] = Field(None, description="Transcription processing time in seconds")
     segments: List[SpeechSegment] = Field(default_factory=list, description="Transcribed speech segments")
+    transcript: Optional[str] = Field(None, description="Full stitched transcript text")
 
 
 class InputInfo(BaseModel):

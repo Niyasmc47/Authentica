@@ -195,8 +195,11 @@ async def record_feedback(
             req_actions = []
             analysis = await DatabaseService.get_analysis(analysis_id)
             if analysis:
-                if analysis.speech and analysis.speech.transcript:
-                    transcript = analysis.speech.transcript
+                if analysis.speech:
+                    if getattr(analysis.speech, "transcript", None):
+                        transcript = analysis.speech.transcript
+                    elif getattr(analysis.speech, "segments", None):
+                        transcript = " ".join([seg.text for seg in analysis.speech.segments if getattr(seg, "text", None)])
                 if analysis.fraud:
                     fraud_cats = [c.category for c in getattr(analysis.fraud, "categories", [])]
                     req_actions = getattr(analysis.fraud, "requested_actions", [])
@@ -214,7 +217,7 @@ async def record_feedback(
                 analyst_id=feedback.analyst_id or "analyst",
                 epochs=15,
                 lr=0.005,
-                force_train=False,
+                force_train=True,
             )
 
         if training_result:
