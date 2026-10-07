@@ -143,7 +143,7 @@ async def record_feedback(
         features = None
         telemetry = None
         mean_emb = None
-        cache_path = Path(f"backend/temp/analyses/{analysis_id}_features.json")
+        cache_path = settings.TEMP_DIR / "analyses" / f"{analysis_id}_features.json"
         if cache_path.exists():
             try:
                 c_data = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -184,30 +184,53 @@ async def record_feedback(
                 analyst_id=feedback.analyst_id or "analyst"
             )
 
-        # 2. Run actual optimizer on AuthenticaVisualAdapter
+        # 2. Run active learning adaptation via ActiveLearningTrainingService
         from app.services.active_learning.training_service import ActiveLearningTrainingService
         training_service = ActiveLearningTrainingService.get_instance()
 
         training_result = None
         if features and feedback.ground_truth_media in ("REAL", "FAKE"):
-            training_result = training_service.train_on_sample(
+            transcript = ""
+            fraud_cats = []
+            req_actions = []
+            analysis = await DatabaseService.get_analysis(analysis_id)
+            if analysis:
+                if analysis.speech and analysis.speech.transcript:
+                    transcript = analysis.speech.transcript
+                if analysis.fraud:
+                    fraud_cats = [c.category for c in getattr(analysis.fraud, "categories", [])]
+                    req_actions = getattr(analysis.fraud, "requested_actions", [])
+
+            training_result = training_service.register_and_train_sample(
                 analysis_id=analysis_id,
                 features=features,
                 telemetry=telemetry,
                 ground_truth_media=feedback.ground_truth_media,
+                ground_truth_fraud=feedback.ground_truth_fraud,
+                transcript=transcript,
+                fraud_categories=fraud_cats,
+                requested_actions=req_actions,
+                notes=feedback.notes or "",
+                analyst_id=feedback.analyst_id or "analyst",
                 epochs=15,
-                lr=0.005
+                lr=0.005,
+                force_train=False,
             )
 
-        msg = (
-            f"Verification stored. Training complete: Adapter updated to {training_service.active_version}."
-            if training_result
-            else "Ground-truth feedback recorded successfully."
-        )
+        if training_result:
+            if training_result.get("status") == "training_completed":
+                status_str = "training_completed"
+                msg = f"Verification stored. Adapter optimized to {training_service.active_version}."
+            else:
+                status_str = "deferred"
+                msg = f"Verification stored in {training_result.get('dataset_version')}. Model adaptation safely deferred until balanced samples are available."
+        else:
+            status_str = "stored_only"
+            msg = "Ground-truth feedback recorded successfully."
 
         return {
             "ok": True,
-            "status": "training_completed" if training_result else "stored_only",
+            "status": status_str,
             "message": msg,
             "sample": sample,
             "training": training_result

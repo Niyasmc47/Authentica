@@ -320,6 +320,14 @@ export const ResultsPage: React.FC = () => {
             )}
             <span>·</span>
             <span className="text-smoke">ID: {analysis.id.slice(0, 8)}</span>
+            {analysis.cached && (
+              <>
+                <span>·</span>
+                <span className="px-2 py-0.5 rounded-pill bg-voltage text-carbon font-bold text-[10px] border border-carbon flex items-center gap-1 shadow-sm">
+                  ⚡ FAST RE-ANALYSIS ({analysis.reanalysis_speedup_ms ? `${analysis.reanalysis_speedup_ms}ms` : '<50ms'})
+                </span>
+              </>
+            )}
           </div>
         </div>
 

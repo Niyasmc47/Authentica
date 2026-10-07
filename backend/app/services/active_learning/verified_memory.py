@@ -4,9 +4,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from app.core.logging import logger
-
-DEFAULT_REGISTRY_PATH = Path("backend/data/verified_media_registry.json")
-
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent.parent
+DEFAULT_REGISTRY_PATH = _BACKEND_DIR / "data" / "verified_media_registry.json"
 
 class VerifiedMediaRegistry:
     """

@@ -97,6 +97,7 @@ class EvidenceMetadata(BaseModel):
     exact_verified_match: Optional[bool] = Field(None, description="True if identical SHA-256 binary was previously human-verified")
     verified_ground_truth: Optional[dict] = Field(None, description="Stored human ground-truth verdict if previously verified")
     near_duplicate_match: Optional[dict] = Field(None, description="Perceptual / feature similarity matching data for near-duplicates")
+    cached_reanalysis: Optional[bool] = Field(None, description="True if result was returned from fast re-analysis cache")
 
 
 class EvidenceMatrix(BaseModel):

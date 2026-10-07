@@ -170,6 +170,8 @@ export interface AnalysisResponse {
   explanation: string[];
   limitations: string[];
   fraud: FraudResult | null;
+  cached?: boolean;
+  reanalysis_speedup_ms?: number;
 }
 
 export interface HistoryItem {

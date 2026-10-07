@@ -144,6 +144,10 @@ class AnalysisResponse(BaseModel):
     
     # Stage 3: Fraud Intent Engine outputs
     fraud: Optional[FraudResult] = Field(None, description="Fraud intent & social-engineering risk findings")
+    
+    # Fast Re-Analysis & Cache Telemetry
+    cached: Optional[bool] = Field(False, description="Whether this response was served from fast re-analysis cache")
+    reanalysis_speedup_ms: Optional[float] = Field(None, description="Latency in milliseconds if served from fast cache")
 
 
 class HealthResponse(BaseModel):

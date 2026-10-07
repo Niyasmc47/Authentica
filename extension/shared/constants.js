@@ -2,7 +2,7 @@
  * Authentica Extension — Shared Constants & Configuration Defaults
  */
 
-export const DEFAULT_API_URL = 'https://glory-rats-starter-deadline.trycloudflare.com';
+export const DEFAULT_API_URL = 'https://anatomy-enemies-acoustic-grade.trycloudflare.com';
 export const DEFAULT_WEB_APP_URL = 'https://authenticax-two.vercel.app';
 
 // Fixed capture duration (12.0 seconds for robust conversational speech context)

@@ -11,7 +11,7 @@ export async function getApiUrl() {
   try {
     const data = await chrome.storage.local.get(STORAGE_KEYS.API_URL);
     const stored = data[STORAGE_KEYS.API_URL];
-    if (stored && typeof stored === 'string' && !stored.includes('localhost') && !stored.includes('127.0.0.1') && stored.startsWith('http')) {
+    if (stored && typeof stored === 'string' && !stored.includes('glory-rats') && stored.startsWith('http')) {
       return stored.replace(/\/+$/, '').replace(/\/api$/, '');
     }
     await chrome.storage.local.set({ [STORAGE_KEYS.API_URL]: DEFAULT_API_URL });
@@ -28,7 +28,7 @@ export async function getWebAppUrl() {
   try {
     const data = await chrome.storage.local.get(STORAGE_KEYS.WEB_APP_URL);
     const stored = data[STORAGE_KEYS.WEB_APP_URL];
-    if (stored && typeof stored === 'string' && !stored.includes('localhost') && !stored.includes('127.0.0.1') && stored.startsWith('http')) {
+    if (stored && typeof stored === 'string' && stored.startsWith('http')) {
       return stored.replace(/\/+$/, '');
     }
 
@@ -39,7 +39,7 @@ export async function getWebAppUrl() {
         if (tab.url && (tab.url.includes('.vercel.app') || (tab.title && tab.title.toUpperCase().includes('AUTHENTICA')))) {
           try {
             const parsed = new URL(tab.url);
-            if (!parsed.protocol.startsWith('chrome') && !parsed.protocol.startsWith('about') && !parsed.origin.includes('localhost') && !parsed.origin.includes('127.0.0.1')) {
+            if (!parsed.protocol.startsWith('chrome') && !parsed.protocol.startsWith('about')) {
               const origin = parsed.origin;
               await chrome.storage.local.set({ [STORAGE_KEYS.WEB_APP_URL]: origin });
               return origin;
@@ -75,14 +75,14 @@ export async function checkBackendHealth(apiUrl) {
       const res = await fetch(`${target}/api/health`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(2500),
+        signal: AbortSignal.timeout(6000),
       });
       if (res.ok) {
         const data = await res.json();
         return { ok: true, data, activeUrl: target };
       }
-    } catch {
-      // try next candidate
+    } catch (err) {
+      console.warn(`[Authentica] Health check failed for ${target}:`, err);
     }
   }
   return { ok: false, error: 'Cannot reach Authentica backend service.' };

@@ -72,11 +72,12 @@ class VisualDeepfakeDetector(VisualDetector):
         self.yunet_detector: Optional[Any] = None
         self._is_loaded = False
 
-        # Image transform: Resize to 224x224 and convert to float tensor [0, 1]
+        # Image transform: Resize to 224x224, convert to tensor [0, 1], and apply ImageNet normalization
         self.transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.Resize(IMAGE_SIZE),
             transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
     @classmethod
