@@ -143,23 +143,52 @@ class FasterWhisperTranscriber(SpeechToText):
             if audio_data.ndim > 1:
                 audio_data = np.mean(audio_data, axis=1)
 
-            # Transcribe with Voice Activity Detection (VAD) filter
+            # For streaming audio clips (< 25 seconds), disable VAD filter to prevent Silero-VAD
+            # from erroneously stripping spoken conversational sentences in streaming chunks.
+            duration_s = len(audio_data) / max(1, sr)
+            use_vad = duration_s >= 25.0
+
             raw_segments, info = self.model.transcribe(
                 audio_data,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=500),
-                beam_size=5
+                vad_filter=use_vad,
+                vad_parameters=dict(min_silence_duration_ms=400, threshold=0.35) if use_vad else None,
+                beam_size=5,
+                no_speech_threshold=0.6,
+                condition_on_previous_text=False,
+                compression_ratio_threshold=2.4,
             )
 
             segments: List[SpeechSegment] = []
             for seg in raw_segments:
                 text_clean = seg.text.strip()
-                if text_clean:
+                # Suppress non-speech artifacts and hallucinations
+                no_speech_prob = getattr(seg, "no_speech_prob", 0.0)
+                if text_clean and no_speech_prob < 0.65:
                     segments.append(SpeechSegment(
                         start_s=round(float(seg.start), 2),
                         end_s=round(float(seg.end), 2),
                         text=text_clean
                     ))
+
+            # Resilient fallback: if VAD returned 0 segments on non-silent audio, retry directly
+            if len(segments) == 0 and len(audio_data) > 0 and np.max(np.abs(audio_data)) > 0.005:
+                retry_segments, info = self.model.transcribe(
+                    audio_data,
+                    vad_filter=False,
+                    beam_size=5,
+                    no_speech_threshold=0.6,
+                    condition_on_previous_text=False,
+                    compression_ratio_threshold=2.4,
+                )
+                for seg in retry_segments:
+                    text_clean = seg.text.strip()
+                    no_speech_prob = getattr(seg, "no_speech_prob", 0.0)
+                    if text_clean and no_speech_prob < 0.65:
+                        segments.append(SpeechSegment(
+                            start_s=round(float(seg.start), 2),
+                            end_s=round(float(seg.end), 2),
+                            text=text_clean
+                        ))
 
             elapsed = round(time.perf_counter() - start_time, 3)
             detected_lang = info.language if info else "unknown"

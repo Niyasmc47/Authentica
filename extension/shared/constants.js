@@ -2,11 +2,11 @@
  * Authentica Extension — Shared Constants & Configuration Defaults
  */
 
-export const DEFAULT_API_URL = 'http://localhost:8000';
-export const DEFAULT_WEB_APP_URL = 'http://localhost:3000';
+export const DEFAULT_API_URL = 'https://glory-rats-starter-deadline.trycloudflare.com';
+export const DEFAULT_WEB_APP_URL = 'https://authenticax-two.vercel.app';
 
-// Fixed capture duration (4.0 seconds for fast real-time responsiveness)
-export const CAPTURE_DURATION_MS = 4000;
+// Fixed capture duration (12.0 seconds for robust conversational speech context)
+export const CAPTURE_DURATION_MS = 12000;
 
 export const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
 

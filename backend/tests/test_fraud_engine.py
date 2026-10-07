@@ -279,3 +279,112 @@ def test_10_no_speech(fraud_engine):
     )
     result = fraud_engine.analyze(speech_empty)
     assert result.level == "NOT_ASSESSABLE"
+
+
+def test_11_joke_send_me_money_bro(fraud_engine):
+    """Jokes with emojis: 'send me money bro 😂' -> LOW."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=3.0,
+        text="send me money bro 😂",
+        segments=[SpeechSegment(start_s=0.0, end_s=3.0, text="send me money bro 😂")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "LOW"
+
+
+def test_12_legitimate_conversation_debt(fraud_engine):
+    """Legitimate conversation: 'Can you send me the money you owe me?' -> LOW."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=3.0,
+        text="Can you send me the money you owe me for lunch?",
+        segments=[SpeechSegment(start_s=0.0, end_s=3.0, text="Can you send me the money you owe me for lunch?")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "LOW"
+
+
+def test_13_news_police_warning(fraud_engine):
+    """News: 'Police warned people not to send money.' -> news downgrade / LOW."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="Police warned people not to send money to unknown callers.",
+        segments=[SpeechSegment(start_s=0.0, end_s=4.0, text="Police warned people not to send money to unknown callers.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.news_context_downgrade is True or res.level == "LOW"
+
+
+def test_14_educational_never_share_otp(fraud_engine):
+    """Educational: 'Never share your OTP.' -> LOW, no SHARE_OTP action."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=3.0,
+        text="Never share your OTP with anyone.",
+        segments=[SpeechSegment(start_s=0.0, end_s=3.0, text="Never share your OTP with anyone.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "LOW"
+    assert not any(act.action == "SHARE_OTP" for act in res.requested_actions)
+
+
+def test_15_scam_send_otp_immediately(fraud_engine):
+    """Scam: 'Send me your OTP immediately.' -> HIGH."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=3.0,
+        text="Send me your OTP immediately right now.",
+        segments=[SpeechSegment(start_s=0.0, end_s=3.0, text="Send me your OTP immediately right now.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "HIGH"
+    assert any(act.action == "SHARE_OTP" for act in res.requested_actions)
+
+
+def test_16_authority_manager_transfer_money_now(fraud_engine):
+    """Authority: 'I am your manager. Transfer the money now.' -> HIGH."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="I am your manager. Transfer the money now immediately.",
+        segments=[SpeechSegment(start_s=0.0, end_s=4.0, text="I am your manager. Transfer the money now immediately.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "HIGH"
+    assert any(act.action in ("TRANSFER_MONEY", "SEND_MONEY") for act in res.requested_actions)
+
+
+def test_17_indirect_card_not_working_transfer(fraud_engine):
+    """Indirect: 'My card isn't working. Can you make a small transfer?' -> detects TRANSFER_MONEY."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="My card isn't working. Can you make a small transfer?",
+        segments=[SpeechSegment(start_s=0.0, end_s=4.0, text="My card isn't working. Can you make a small transfer?")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert any(act.action == "TRANSFER_MONEY" for act in res.requested_actions)
+

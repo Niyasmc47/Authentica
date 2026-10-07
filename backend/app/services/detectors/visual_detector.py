@@ -2,7 +2,7 @@ import os
 import time
 import urllib.request
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -69,6 +69,7 @@ class VisualDeepfakeDetector(VisualDetector):
         # Model and detector holders
         self.model: Optional[nn.Module] = None
         self.face_detector: Optional[vision.FaceDetector] = None
+        self.yunet_detector: Optional[Any] = None
         self._is_loaded = False
 
         # Image transform: Resize to 224x224 and convert to float tensor [0, 1]
@@ -114,6 +115,31 @@ class VisualDeepfakeDetector(VisualDetector):
             raise
 
     def _load_face_detector(self) -> None:
+        """Initializes OpenCV YuNet face detector with MediaPipe BlazeFace fallback."""
+        cache_dir = Path.home() / ".cache" / "opencv"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        yunet_path = cache_dir / "face_detection_yunet_2023mar.onnx"
+
+        # Try YuNet first (OpenCV-native, CPU-optimized, provides landmarks and confidence)
+        if yunet_path.exists():
+            try:
+                self.yunet_detector = cv2.FaceDetectorYN.create(
+                    model=str(yunet_path.resolve()),
+                    config="",
+                    input_size=(320, 320),
+                    score_threshold=self.min_face_confidence,
+                    nms_threshold=0.3,
+                    top_k=5000,
+                )
+                logger.info("VisualDeepfakeDetector: OpenCV YuNet face detector initialized.")
+            except Exception as e:
+                logger.warning(f"VisualDeepfakeDetector: Failed to create YuNet detector: {e}")
+                self.yunet_detector = None
+
+        # Always load MediaPipe BlazeFace as reliable backup/fallback
+        self._load_mediapipe_detector()
+
+    def _load_mediapipe_detector(self) -> None:
         """Downloads and initializes the MediaPipe FaceDetector task."""
         cache_dir = Path.home() / ".cache" / "mediapipe"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -161,58 +187,184 @@ class VisualDeepfakeDetector(VisualDetector):
         self.model = model
         logger.debug("EfficientNet-B0 FF++ C23 model loaded and set to eval mode.")
 
-    def detect_primary_face(self, img_rgb: np.ndarray) -> Optional[np.ndarray]:
-        """
-        Detects faces using MediaPipe and extracts the primary face crop.
-        
-        Selection strategy:
-          - If 1 face: return that crop.
-          - If multiple faces: return the face with largest bounding box area.
-          - If 0 faces: return None.
-        
-        Includes safety margin and bounds clamping.
-        """
-        if self.face_detector is None:
-            raise RuntimeError("Face detector is not initialized. Call load() first.")
+    @staticmethod
+    def _calculate_iou(b1: Tuple[int, int, int, int], b2: Tuple[int, int, int, int]) -> float:
+        x1, y1, w1, h1 = b1
+        x2, y2, w2, h2 = b2
+        xi1 = max(x1, x2)
+        yi1 = max(y1, y2)
+        xi2 = min(x1 + w1, x2 + w2)
+        yi2 = min(y1 + h1, y2 + h2)
+        inter_w = max(0, xi2 - xi1)
+        inter_h = max(0, yi2 - yi1)
+        inter_area = inter_w * inter_h
+        union_area = (w1 * h1) + (w2 * h2) - inter_area
+        return inter_area / union_area if union_area > 0 else 0.0
 
+    @staticmethod
+    def _compute_capture_quality(face_crop_rgb: np.ndarray) -> Tuple[float, float, float]:
+        """
+        Computes capture quality metrics:
+          1. blur_score: Variance of Laplacian (higher = sharper, <50 is blurry)
+          2. luma: Mean luminance of grayscale image (0-255)
+          3. noise_estimate: High-frequency residual standard deviation
+        """
+        try:
+            gray = cv2.cvtColor(face_crop_rgb, cv2.COLOR_RGB2GRAY)
+            blur_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            luma = float(np.mean(gray))
+            gaussian = cv2.GaussianBlur(gray, (5, 5), 0)
+            noise_residual = gray.astype(np.float32) - gaussian.astype(np.float32)
+            noise_estimate = float(np.std(noise_residual))
+            return round(blur_score, 2), round(luma, 2), round(noise_estimate, 2)
+        except Exception:
+            return 50.0, 128.0, 2.0
+
+    def detect_face_with_meta(
+        self,
+        img_rgb: np.ndarray,
+        prev_box: Optional[Tuple[int, int, int, int]] = None
+    ) -> Optional[Tuple[np.ndarray, float, List[int], int, float, float, float]]:
+        """
+        Detects primary face, applies lightweight box smoothing, and computes capture quality features.
+        Returns:
+            (face_crop_rgb, face_confidence, bounding_box, face_pixel_size, blur_score, luma, noise_estimate)
+        """
         h, w, _ = img_rgb.shape
         if h == 0 or w == 0:
             return None
 
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
-        detection_result = self.face_detector.detect(mp_image)
+        detected_box = None
+        detected_conf = 0.5
 
-        if not detection_result.detections:
+        # 1. Try YuNet first (OpenCV-native DNN)
+        if self.yunet_detector is not None:
+            try:
+                img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+                self.yunet_detector.setInputSize((w, h))
+                _, faces = self.yunet_detector.detect(img_bgr)
+                if faces is not None and len(faces) > 0:
+                    best_area = -1
+                    for f in faces:
+                        score = float(f[-1])
+                        if score >= self.min_face_confidence:
+                            bx, by, bw, bh = int(f[0]), int(f[1]), int(f[2]), int(f[3])
+                            area = bw * bh
+                            if area > best_area:
+                                best_area = area
+                                detected_box = (bx, by, bw, bh)
+                                detected_conf = score
+            except Exception as e:
+                logger.debug(f"YuNet detection exception: {e}")
+
+        # 2. Fallback to MediaPipe BlazeFace if YuNet found nothing
+        if detected_box is None and self.face_detector is not None:
+            try:
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+                detection_result = self.face_detector.detect(mp_image)
+                if detection_result.detections:
+                    best_area = -1
+                    for det in detection_result.detections:
+                        box = det.bounding_box
+                        area = box.width * box.height
+                        score = float(det.categories[0].score) if det.categories else 0.5
+                        if area > best_area:
+                            best_area = area
+                            detected_box = (box.origin_x, box.origin_y, box.width, box.height)
+                            detected_conf = score
+            except Exception as e:
+                logger.debug(f"MediaPipe detection exception: {e}")
+
+        if detected_box is None:
             return None
 
-        # Select primary face based on bounding box area
-        best_box = None
-        max_area = -1
+        # 3. Lightweight temporal box smoothing if IoU >= 0.35 with previous frame
+        bx, by, bw, bh = detected_box
+        if prev_box is not None:
+            iou = self._calculate_iou(detected_box, prev_box)
+            if iou >= 0.35:
+                alpha = 0.7
+                bx = int(round(alpha * bx + (1 - alpha) * prev_box[0]))
+                by = int(round(alpha * by + (1 - alpha) * prev_box[1]))
+                bw = int(round(alpha * bw + (1 - alpha) * prev_box[2]))
+                bh = int(round(alpha * bh + (1 - alpha) * prev_box[3]))
 
-        for det in detection_result.detections:
-            box = det.bounding_box
-            area = box.width * box.height
-            if area > max_area:
-                max_area = area
-                best_box = box
-
-        if best_box is None:
+        crop = self._crop_square_face(
+            img_rgb=img_rgb,
+            origin_x=bx,
+            origin_y=by,
+            width=bw,
+            height=bh,
+            margin_ratio=0.15
+        )
+        if crop is None or crop.size == 0:
             return None
 
-        # Add 10% padding around face crop for forensic context
-        pad_x = int(best_box.width * 0.10)
-        pad_y = int(best_box.height * 0.10)
+        pixel_size = min(bw, bh)
+        blur_score, luma, noise_est = self._compute_capture_quality(crop)
+        bbox_list = [int(bx), int(by), int(bw), int(bh)]
 
-        x1 = max(0, best_box.origin_x - pad_x)
-        y1 = max(0, best_box.origin_y - pad_y)
-        x2 = min(w, best_box.origin_x + best_box.width + pad_x)
-        y2 = min(h, best_box.origin_y + best_box.height + pad_y)
+        return (crop, detected_conf, bbox_list, pixel_size, blur_score, luma, noise_est)
 
-        if x2 <= x1 or y2 <= y1:
+    def detect_primary_face(self, img_rgb: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Detects primary face and extracts a square crop.
+        Preserves geometric aspect ratio for arbitrary orientations (landscape, square, portrait).
+        """
+        meta = self.detect_face_with_meta(img_rgb)
+        if meta is not None:
+            return meta[0]
+        return None
+
+    def _crop_square_face(
+        self,
+        img_rgb: np.ndarray,
+        origin_x: int,
+        origin_y: int,
+        width: int,
+        height: int,
+        margin_ratio: float = 0.15
+    ) -> Optional[np.ndarray]:
+        """
+        Extracts a square bounding box centered on the given coordinates with margin and reflection padding.
+        """
+        h, w, _ = img_rgb.shape
+        if h == 0 or w == 0 or width <= 0 or height <= 0:
             return None
 
-        face_crop = img_rgb[y1:y2, x1:x2]
-        return face_crop
+        center_x = origin_x + width / 2.0
+        center_y = origin_y + height / 2.0
+        side = max(width, height) * (1.0 + margin_ratio)
+
+        x1 = int(round(center_x - side / 2.0))
+        y1 = int(round(center_y - side / 2.0))
+        x2 = int(round(center_x + side / 2.0))
+        y2 = int(round(center_y + side / 2.0))
+
+        # Clamp slice coordinates to image boundary
+        src_x1 = max(0, x1)
+        src_y1 = max(0, y1)
+        src_x2 = min(w, x2)
+        src_y2 = min(h, y2)
+
+        if src_x2 <= src_x1 or src_y2 <= src_y1:
+            return None
+
+        crop = img_rgb[src_y1:src_y2, src_x1:src_x2]
+        if crop.size == 0:
+            return None
+
+        ch, cw, _ = crop.shape
+        # Pad with border reflection to guarantee exact square shape before 224x224 resize
+        if ch != cw:
+            target_dim = max(ch, cw)
+            top = (target_dim - ch) // 2
+            bottom = target_dim - ch - top
+            left = (target_dim - cw) // 2
+            right = target_dim - cw - left
+            crop = cv2.copyMakeBorder(crop, top, bottom, left, right, cv2.BORDER_REFLECT_101)
+
+        return crop
 
     @staticmethod
     def _calculate_face_forensics(face_crop_rgb: np.ndarray) -> Tuple[float, float]:
@@ -268,22 +420,25 @@ class VisualDeepfakeDetector(VisualDetector):
 
         fake_score = raw_fake
 
-        # 1. Webcam Compression & Low-Resolution Gating:
-        # If crop is small (<120px) or low sharpness without strong AI spectral anomaly,
-        # damp compression noise towards genuine baseline
-        if min_dim < 120 or sharpness < 0.40:
-            quality_factor = min(1.0, max(0.2, (min_dim / 120.0) * (sharpness / 0.40)))
-            if spectral_anomaly < 0.35:
-                # Natural camera compression: pull towards genuine baseline
-                fake_score = fake_score * (0.35 + 0.65 * quality_factor)
-            else:
-                # High spectral anomaly: retain AI generation artifact score
-                fake_score = fake_score * 0.85 + spectral_anomaly * 0.15
+        # 1. Webcam Compression, Motion Blur & Low-Resolution Gating:
+        # If crop is low sharpness or small without strong AI spectral anomaly,
+        # natural camera blur should never trigger synthetic deepfake alarms
+        if sharpness < 0.45 and spectral_anomaly < 0.35:
+            # Genuine blurry/compressed camera feed: damp fake score heavily
+            fake_score = min(fake_score, fake_score * 0.35)
+            if sharpness < 0.25:
+                fake_score = min(fake_score, 0.20)
+        elif min_dim < 120 and spectral_anomaly < 0.35:
+            quality_factor = min(1.0, max(0.2, (min_dim / 120.0)))
+            fake_score = fake_score * (0.30 + 0.70 * quality_factor)
+        elif spectral_anomaly >= 0.35:
+            # High spectral anomaly: retain AI generation artifact score
+            fake_score = fake_score * 0.85 + spectral_anomaly * 0.15
 
         # 2. Clean Camera Optics:
         # High sharpness with minimal spectral anomaly indicates authentic camera feed
-        if sharpness > 0.60 and spectral_anomaly < 0.10:
-            fake_score = min(fake_score, fake_score * 0.85)
+        if sharpness > 0.55 and spectral_anomaly < 0.12:
+            fake_score = min(fake_score, fake_score * 0.75)
 
         fake_score = float(np.clip(fake_score, 0.01, 0.99))
         fake_score = round(fake_score, 4)
@@ -292,8 +447,8 @@ class VisualDeepfakeDetector(VisualDetector):
 
     def predict_face_crop(self, face_crop_rgb: np.ndarray) -> Tuple[float, float]:
         """
-        Runs model inference on a single RGB face crop with quality-aware calibration.
-        Returns: (real_score, fake_score)
+        Runs model inference on a single RGB face crop.
+        Returns: (real_score, fake_score) where real_score + fake_score == 1.0.
         """
         if self.model is None:
             raise RuntimeError("Classifier model is not initialized. Call load() first.")
@@ -302,17 +457,16 @@ class VisualDeepfakeDetector(VisualDetector):
 
         with torch.no_grad():
             logits = self.model(tensor)
-            scaled_logits = logits / 1.2
-            probs = torch.softmax(scaled_logits, dim=-1)[0]
-            raw_real = float(probs[0].item())
-            raw_fake = float(probs[1].item())
+            probs = torch.softmax(logits, dim=-1)[0]
+            raw_real = round(float(probs[0].item()), 4)
+            raw_fake = round(float(probs[1].item()), 4)
 
-        return self._calibrate_crop_score(raw_real, raw_fake, face_crop_rgb)
+        return raw_real, raw_fake
 
     def predict_batch(self, face_crops_rgb: List[np.ndarray]) -> List[Tuple[float, float]]:
         """
-        Runs batched model inference on a list of RGB face crops with quality-aware calibration.
-        Returns: List of (real_score, fake_score)
+        Runs batched model inference on a list of RGB face crops.
+        Returns: List of (real_score, fake_score) where real_score + fake_score == 1.0.
         """
         if not face_crops_rgb:
             return []
@@ -325,16 +479,11 @@ class VisualDeepfakeDetector(VisualDetector):
 
         with torch.no_grad():
             logits = self.model(batch_tensor)
-            scaled_logits = logits / 1.2
-            probs = torch.softmax(scaled_logits, dim=-1)
-            raw_scores = [
-                (float(p[0].item()), float(p[1].item()))
+            probs = torch.softmax(logits, dim=-1)
+            results = [
+                (round(float(p[0].item()), 4), round(float(p[1].item()), 4))
                 for p in probs
             ]
-
-        results: List[Tuple[float, float]] = []
-        for crop, (raw_real, raw_fake) in zip(face_crops_rgb, raw_scores):
-            results.append(self._calibrate_crop_score(raw_real, raw_fake, crop))
 
         return results
 
@@ -379,6 +528,7 @@ class VisualDeepfakeDetector(VisualDetector):
         frame_results: List[VisualFrameResult] = []
         valid_face_crops: List[np.ndarray] = []
         face_crop_indices: List[int] = []  # Maps crop index to frame_results index
+        prev_box: Optional[Tuple[int, int, int, int]] = None
 
         for idx, frame_sample in enumerate(frames):
             ts = frame_sample.timestamp_s
@@ -387,6 +537,7 @@ class VisualDeepfakeDetector(VisualDetector):
             # Handle unreadable / missing frame files safely
             if not frame_path.exists():
                 logger.warning(f"Frame file does not exist: {frame_path}")
+                prev_box = None
                 frame_results.append(VisualFrameResult(
                     timestamp_s=ts,
                     face_detected=False,
@@ -399,6 +550,7 @@ class VisualDeepfakeDetector(VisualDetector):
                 img_bgr = cv2.imread(str(frame_path.resolve()))
                 if img_bgr is None or img_bgr.size == 0:
                     logger.warning(f"Failed to read image at {frame_path}")
+                    prev_box = None
                     frame_results.append(VisualFrameResult(
                         timestamp_s=ts,
                         face_detected=False,
@@ -408,10 +560,11 @@ class VisualDeepfakeDetector(VisualDetector):
                     continue
 
                 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-                face_crop = self.detect_primary_face(img_rgb)
+                res = self.detect_face_with_meta(img_rgb, prev_box=prev_box)
 
-                if face_crop is None:
+                if res is None:
                     # No face detected in this frame
+                    prev_box = None
                     frame_results.append(VisualFrameResult(
                         timestamp_s=ts,
                         face_detected=False,
@@ -419,18 +572,27 @@ class VisualDeepfakeDetector(VisualDetector):
                         fake_score=None
                     ))
                 else:
-                    # Face detected - stage for inference
+                    face_crop, face_conf, bbox, pixel_size, blur_val, luma_val, noise_val = res
+                    prev_box = (bbox[0], bbox[1], bbox[2], bbox[3])
+                    # Face detected - stage for inference with capture-quality telemetry
                     frame_results.append(VisualFrameResult(
                         timestamp_s=ts,
                         face_detected=True,
                         real_score=None,
-                        fake_score=None
+                        fake_score=None,
+                        face_confidence=round(face_conf, 4),
+                        bounding_box=bbox,
+                        face_pixel_size=pixel_size,
+                        blur_score=blur_val,
+                        luma=luma_val,
+                        noise_estimate=noise_val,
                     ))
                     valid_face_crops.append(face_crop)
                     face_crop_indices.append(len(frame_results) - 1)
 
             except Exception as e:
                 logger.warning(f"Error processing frame {frame_path.name} at {ts}s: {e}")
+                prev_box = None
                 frame_results.append(VisualFrameResult(
                     timestamp_s=ts,
                     face_detected=False,

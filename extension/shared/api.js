@@ -10,19 +10,49 @@ import { DEFAULT_API_URL, DEFAULT_WEB_APP_URL, STORAGE_KEYS } from './constants.
 export async function getApiUrl() {
   try {
     const data = await chrome.storage.local.get(STORAGE_KEYS.API_URL);
-    return data[STORAGE_KEYS.API_URL] || DEFAULT_API_URL;
+    const stored = data[STORAGE_KEYS.API_URL];
+    if (stored && typeof stored === 'string' && !stored.includes('localhost') && !stored.includes('127.0.0.1') && stored.startsWith('http')) {
+      return stored.replace(/\/+$/, '').replace(/\/api$/, '');
+    }
+    await chrome.storage.local.set({ [STORAGE_KEYS.API_URL]: DEFAULT_API_URL });
+    return DEFAULT_API_URL;
   } catch {
     return DEFAULT_API_URL;
   }
 }
 
 /**
- * Retrieves configured Web Application URL with default fallback.
+ * Retrieves configured Web Application URL with automatic Vercel tab detection and default fallback.
  */
 export async function getWebAppUrl() {
   try {
     const data = await chrome.storage.local.get(STORAGE_KEYS.WEB_APP_URL);
-    return data[STORAGE_KEYS.WEB_APP_URL] || DEFAULT_WEB_APP_URL;
+    const stored = data[STORAGE_KEYS.WEB_APP_URL];
+    if (stored && typeof stored === 'string' && !stored.includes('localhost') && !stored.includes('127.0.0.1') && stored.startsWith('http')) {
+      return stored.replace(/\/+$/, '');
+    }
+
+    // Auto-detect open Authentica web app tabs (Vercel or custom hosted domain)
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
+        if (tab.url && (tab.url.includes('.vercel.app') || (tab.title && tab.title.toUpperCase().includes('AUTHENTICA')))) {
+          try {
+            const parsed = new URL(tab.url);
+            if (!parsed.protocol.startsWith('chrome') && !parsed.protocol.startsWith('about') && !parsed.origin.includes('localhost') && !parsed.origin.includes('127.0.0.1')) {
+              const origin = parsed.origin;
+              await chrome.storage.local.set({ [STORAGE_KEYS.WEB_APP_URL]: origin });
+              return origin;
+            }
+          } catch {
+            // skip invalid url
+          }
+        }
+      }
+    }
+
+    await chrome.storage.local.set({ [STORAGE_KEYS.WEB_APP_URL]: DEFAULT_WEB_APP_URL });
+    return DEFAULT_WEB_APP_URL;
   } catch {
     return DEFAULT_WEB_APP_URL;
   }
@@ -32,7 +62,7 @@ export async function getWebAppUrl() {
  * Performs a fast health verification check against the backend with fallback.
  */
 export async function checkBackendHealth(apiUrl) {
-  const primary = apiUrl || (await getApiUrl());
+  let primary = (apiUrl || (await getApiUrl())).trim().replace(/\/+$/, '').replace(/\/api$/, '');
   const candidates = [primary];
   if (primary.includes('localhost')) {
     candidates.push(primary.replace('localhost', '127.0.0.1'));
@@ -55,7 +85,7 @@ export async function checkBackendHealth(apiUrl) {
       // try next candidate
     }
   }
-  return { ok: false, error: 'Cannot reach Authentica backend service on port 8000' };
+  return { ok: false, error: 'Cannot reach Authentica backend service.' };
 }
 
 /**
@@ -67,8 +97,8 @@ export async function checkBackendHealth(apiUrl) {
  * @param {object} [metadata] - Optional tab metadata
  */
 export async function uploadClipForAnalysis(mediaBlob, filename, metadata = {}) {
-  let apiUrl = await getApiUrl();
-  const webAppUrl = await getWebAppUrl();
+  let apiUrl = (await getApiUrl()).trim().replace(/\/+$/, '').replace(/\/api$/, '');
+  const webAppUrl = (await getWebAppUrl()).trim().replace(/\/+$/, '');
 
   if (!mediaBlob || mediaBlob.size === 0) {
     throw new Error('Recorded media clip is empty (0 bytes). Scan aborted.');
@@ -164,7 +194,7 @@ export async function uploadClipForAnalysis(mediaBlob, filename, metadata = {}) 
     fraudRiskScore: fraudLevel === 'HIGH' ? 0.9 : (fraudLevel === 'MEDIUM' ? 0.5 : 0.1),
     requestedAction: data.fraud?.requested_actions?.[0]?.action || null,
     explanations: Array.isArray(data.explanation) ? data.explanation.slice(0, 3) : [],
-    fullReportUrl: `${webAppUrl}/results/${data.id}`,
+    fullReportUrl: `${(webAppUrl && !webAppUrl.includes('localhost') && !webAppUrl.includes('127.0.0.1')) ? webAppUrl : DEFAULT_WEB_APP_URL}/results/${data.id}`,
     timestamp: Date.now(),
     capturedTabTitle: metadata.tabTitle || 'Current Tab',
     capturedTabUrl: metadata.tabUrl || '',

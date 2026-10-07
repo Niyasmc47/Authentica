@@ -17,13 +17,25 @@ class ModelEvidenceItem(BaseModel):
     )
 
 
+class LocalizedRegion(BaseModel):
+    """Contiguous temporal region of persistent high forensic manipulation evidence."""
+    start_s: float = Field(..., description="Start timestamp of high-evidence region in seconds")
+    end_s: float = Field(..., description="End timestamp of high-evidence region in seconds")
+    level: str = Field("HIGH", description="Regional evidence level ('HIGH')")
+    mean_score: Optional[float] = Field(None, description="Average manipulation score across region")
+
+
 class ModalityStatistics(BaseModel):
     """Robust statistical metrics across frames/windows for calibrated decisions."""
+    valid_frame_count: int = Field(0, description="Count of valid face/audio observations evaluated")
     mean_score: Optional[float] = Field(None, description="Arithmetic mean score across evaluated items")
     median_score: Optional[float] = Field(None, description="Median score across evaluated items")
     max_score: Optional[float] = Field(None, description="Maximum observed score (diagnostic only)")
-    high_ratio: Optional[float] = Field(None, description="Ratio of frames or windows exceeding high threshold")
+    high_ratio: Optional[float] = Field(None, description="Ratio of frames exceeding high threshold")
     consecutive_high_count: int = Field(0, description="Maximum count of consecutive high windows")
+    high_window_ratio: Optional[float] = Field(None, description="Ratio of temporal windows classified as HIGH")
+    persistent_high_window_ratio: Optional[float] = Field(None, description="Ratio of persistent consecutive high windows")
+    localized_high_regions: List[LocalizedRegion] = Field(default_factory=list, description="Persistent high-evidence temporal regions")
 
 
 class EvidenceModalityResult(BaseModel):
@@ -62,6 +74,10 @@ class ProvenanceResult(BaseModel):
     signer: Optional[str] = Field(
         None,
         description="Common Name or Organization of the signing identity"
+    )
+    ai_generated: Optional[bool] = Field(
+        None,
+        description="True if credentials explicitly declare AI or algorithmic generation"
     )
     note: str = Field(
         ...,

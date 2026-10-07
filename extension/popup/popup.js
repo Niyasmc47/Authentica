@@ -60,6 +60,9 @@ const elements = {
   btnDismissThreat: document.getElementById('btnDismissThreat'),
 
   // Clean Scan controls
+  cleanBadgeText: document.getElementById('cleanBadgeText'),
+  cleanActionBanner: document.getElementById('cleanActionBanner'),
+  cleanDescText: document.getElementById('cleanDescText'),
   btnOpenCleanReport: document.getElementById('btnOpenCleanReport'),
   btnCleanScanAgain: document.getElementById('btnCleanScanAgain'),
 
@@ -231,7 +234,7 @@ function applyGlobalState(state) {
     elements.scanningTitle.textContent = 'Capturing Tab Media';
     elements.scanningDesc.textContent = 'Audio playback remains audible while capturing...';
     if (elements.countdownVal) {
-      elements.countdownVal.textContent = state.quickScan.secondsRemaining || 4;
+      elements.countdownVal.textContent = state.quickScan.secondsRemaining || 12;
     }
     showView(elements.viewScanning);
     return;
@@ -246,7 +249,7 @@ function applyGlobalState(state) {
 
   if (state.quickScan && state.quickScan.state === POPUP_STATES.COMPLETED && state.quickScan.summary) {
     const summary = state.quickScan.summary;
-    const isThreat = summary.action === 'STOP_AND_VERIFY' || summary.action === 'CAUTION' || summary.mediaVerdict === 'LIKELY_MANIPULATED' || summary.mediaVerdict === 'SUSPICIOUS' || summary.visualLevel === 'HIGH' || summary.audioLevel === 'HIGH' || summary.fraudLevel === 'HIGH';
+    const isThreat = summary.fraudLevel === 'HIGH' || summary.fraudLevel === 'CRITICAL' || summary.action === 'STOP_AND_VERIFY' || Boolean(summary.requestedAction);
     if (isThreat) {
       renderThreatAlert(summary);
     } else {
@@ -474,6 +477,38 @@ function renderThreatAlert(summary) {
 function renderScanClean(summary) {
   if (!summary) return;
   activeThreatSummary = summary;
+
+  const isSuspiciousMedia = summary.mediaVerdict === 'SUSPICIOUS' || summary.visualIsSuspicious || summary.audioIsSuspicious;
+  const isUncertain = summary.mediaVerdict === 'UNCERTAIN';
+
+  if (elements.cleanBadgeText) {
+    if (isSuspiciousMedia) {
+      elements.cleanBadgeText.textContent = '🟡 NO FRAUD DETECTED';
+      elements.cleanBadgeText.className = 'safe-badge text-amber-500';
+    } else {
+      elements.cleanBadgeText.textContent = '🟢 NO THREAT DETECTED';
+      elements.cleanBadgeText.className = 'safe-badge';
+    }
+  }
+
+  if (elements.cleanActionBanner) {
+    if (isSuspiciousMedia) {
+      elements.cleanActionBanner.textContent = 'NORMAL MEDIA / NO SCAM';
+      elements.cleanActionBanner.className = 'action-banner-text text-amber-500';
+    } else {
+      elements.cleanActionBanner.textContent = 'NO ACTION FLAGGED';
+      elements.cleanActionBanner.className = 'action-banner-text text-green';
+    }
+  }
+
+  if (elements.cleanDescText) {
+    if (isSuspiciousMedia || isUncertain) {
+      elements.cleanDescText.textContent = 'Analyzed tab media. No financial extraction, OTP theft, or coercive fraud patterns were detected.';
+    } else {
+      elements.cleanDescText.textContent = 'Analyzed sampled frames and audio track. Media and intent are harmless.';
+    }
+  }
+
   showView(elements.viewScanClean);
 }
 
@@ -481,13 +516,17 @@ function renderScanClean(summary) {
  * Opens full analysis report in web app.
  */
 async function handleOpenThreatReportClick() {
-  if (activeThreatSummary && activeThreatSummary.fullReportUrl) {
-    chrome.tabs.create({ url: activeThreatSummary.fullReportUrl });
-  } else if (activeThreatSummary && activeThreatSummary.id) {
-    const webAppUrl = await getWebAppUrl();
+  const rawWebAppUrl = await getWebAppUrl();
+  let webAppUrl = rawWebAppUrl ? rawWebAppUrl.trim().replace(/\/+$/, '') : DEFAULT_WEB_APP_URL;
+  if (webAppUrl.includes('localhost') || webAppUrl.includes('127.0.0.1')) {
+    webAppUrl = DEFAULT_WEB_APP_URL;
+  }
+
+  if (activeThreatSummary && activeThreatSummary.id) {
     chrome.tabs.create({ url: `${webAppUrl}/results/${activeThreatSummary.id}` });
+  } else if (activeThreatSummary && activeThreatSummary.fullReportUrl && !activeThreatSummary.fullReportUrl.includes('localhost')) {
+    chrome.tabs.create({ url: activeThreatSummary.fullReportUrl });
   } else {
-    const webAppUrl = await getWebAppUrl();
     chrome.tabs.create({ url: webAppUrl });
   }
 }
@@ -517,13 +556,28 @@ async function loadSettings() {
 }
 
 async function handleSaveSettingsClick() {
-  const apiUrl = elements.inputApiUrl.value.trim() || DEFAULT_API_URL;
-  const webAppUrl = elements.inputWebAppUrl.value.trim() || DEFAULT_WEB_APP_URL;
+  let apiUrl = elements.inputApiUrl.value.trim().replace(/\/+$/, '') || DEFAULT_API_URL;
+  let webAppUrl = elements.inputWebAppUrl.value.trim().replace(/\/+$/, '') || DEFAULT_WEB_APP_URL;
+
+  // Auto-prefix https:// if protocol was omitted
+  if (webAppUrl && !/^https?:\/\//i.test(webAppUrl)) {
+    webAppUrl = webAppUrl.startsWith('localhost') || webAppUrl.startsWith('127.0.0.1')
+      ? `http://${webAppUrl}`
+      : `https://${webAppUrl}`;
+  }
+  if (apiUrl && !/^https?:\/\//i.test(apiUrl)) {
+    apiUrl = apiUrl.startsWith('localhost') || apiUrl.startsWith('127.0.0.1')
+      ? `http://${apiUrl}`
+      : `https://${apiUrl}`;
+  }
 
   await chrome.storage.local.set({
     [STORAGE_KEYS.API_URL]: apiUrl,
     [STORAGE_KEYS.WEB_APP_URL]: webAppUrl,
   });
+
+  elements.inputApiUrl.value = apiUrl;
+  elements.inputWebAppUrl.value = webAppUrl;
 
   elements.settingsFeedback.textContent = 'Settings saved.';
   await checkHealth();

@@ -74,10 +74,12 @@ class C2PAService:
 
             # Validation state
             validation_state = reader.get_validation_state()
-            is_valid = validation_state is not None and "valid" in str(validation_state).lower()
+            validation_str = str(validation_state).lower() if validation_state is not None else ""
+            is_valid = bool(validation_state is not None and "valid" in validation_str and "invalid" not in validation_str)
             
-            # Extract signer info
+            # Extract signer and assertion info
             signer_name = None
+            ai_generated = False
             manifests = manifest_data.get("manifests", {})
             active_manifest_label = manifest_data.get("active_manifest")
             
@@ -86,16 +88,45 @@ class C2PAService:
                 sig_info = active_manifest.get("signature_info", {})
                 signer_name = sig_info.get("issuer") or sig_info.get("cert_serial_number") or sig_info.get("time")
 
-            # Check if signer is on configured trust list
+                # Check assertions for AI generation metadata
+                assertions = active_manifest.get("assertions", [])
+                for assertion in assertions:
+                    label = str(assertion.get("label", "")).lower()
+                    data = assertion.get("data", {})
+                    data_str = json.dumps(data).lower() if isinstance(data, (dict, list)) else str(data).lower()
+                    if any(term in data_str for term in [
+                        "trainedalgorithmicmedia",
+                        "compositesynthetic",
+                        "algorithmicmedia",
+                        "c2pa.synthetic",
+                        "c2pa.ai_generated",
+                    ]):
+                        ai_generated = True
+                        break
+                    if "ai_generated" in label or "synthetic" in label:
+                        ai_generated = True
+                        break
+                    if "c2pa.actions" in label and any(kw in data_str for kw in ["trainedalgorithmicmedia", "synthetic", "generative"]):
+                        ai_generated = True
+                        break
+
+            # Check if signer is on configured trust list (only valid signatures can be trusted)
             is_trusted = False
-            if signer_name:
+            if is_valid and signer_name:
                 for trusted in self.trusted_signers:
                     if trusted.lower() in signer_name.lower():
                         is_trusted = True
                         break
 
             # Construct informative explanatory note
-            if is_valid and is_trusted:
+            if ai_generated:
+                if is_valid and is_trusted:
+                    note = f"Content credentials verified from trusted signer '{signer_name}', explicitly declaring AI/algorithmic media generation."
+                elif is_valid:
+                    note = f"Content credentials verified from signer '{signer_name or 'Unknown'}', explicitly declaring AI/algorithmic media generation."
+                else:
+                    note = "Content credentials declare AI/algorithmic media generation, but cryptographic signature validation failed."
+            elif is_valid and is_trusted:
                 note = f"Content credentials were found with a valid cryptographic signature from trusted signer: '{signer_name}'."
             elif is_valid and not is_trusted:
                 note = (
@@ -107,7 +138,7 @@ class C2PAService:
 
             logger.info(
                 f"C2PA inspection for {media_path.name}: state=FOUND | valid={is_valid} | "
-                f"trusted={is_trusted} | signer={signer_name}"
+                f"trusted={is_trusted} | signer={signer_name} | ai_generated={ai_generated}"
             )
 
             return ProvenanceResult(
@@ -115,6 +146,7 @@ class C2PAService:
                 valid=is_valid,
                 trusted=is_trusted,
                 signer=signer_name,
+                ai_generated=ai_generated,
                 note=note
             )
 

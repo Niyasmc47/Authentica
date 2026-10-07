@@ -43,14 +43,21 @@ class Settings(BaseSettings):
         "application/octet-stream",
     }
     
-    # Video sampling settings
-    FRAME_SAMPLE_FPS: float = 1.0  # Sample approx 1 frame per second
+    # Video sampling settings (Adaptive sampling strategy for robust temporal forensics)
+    FRAME_SAMPLE_FPS: float = 1.0  # Base sampling rate
+    ADAPTIVE_SAMPLING_ENABLED: bool = True
+    SHORT_VIDEO_FPS: float = 3.0   # Higher density for clips < 5.0s (ensures >= 8-15 frame samples)
+    MEDIUM_VIDEO_FPS: float = 1.5  # Moderate density for clips 5.0s - 12.0s
+    STANDARD_VIDEO_FPS: float = 1.0 # Standard density for longer clips >= 12.0s
+    MAX_SAMPLED_FRAMES: int = 60   # Computational guardrail cap for max frames evaluated per clip
     
     # Stage 2: Reliability Gate Thresholds
     RELIABILITY_MIN_WIDTH: int = 360
     RELIABILITY_MIN_HEIGHT: int = 360
     MIN_FACE_DETECTION_RATE: float = 0.30
     MIN_AUDIO_DURATION: float = 3.0
+    MIN_VISUAL_OBSERVATIONS: int = 5
+    MIN_VIDEO_DURATION: float = 4.0
     
     # Stage 2: Evidence Level Prototype Thresholds
     # Prototype thresholds subject to calibration on team evaluation benchmarks

@@ -43,11 +43,19 @@ class DatabaseService:
             return False
 
         try:
-            logger.info(f"MongoDB: Connecting to Atlas database '{settings.MONGODB_DB_NAME}'...")
+            motor_kwargs = {
+                "serverSelectionTimeoutMS": 4000,
+                "connectTimeoutMS": 4000,
+            }
+            try:
+                import certifi
+                motor_kwargs["tlsCAFile"] = certifi.where()
+            except Exception:
+                pass
+
             cls._client = AsyncIOMotorClient(
                 settings.MONGODB_URI,
-                serverSelectionTimeoutMS=4000,
-                connectTimeoutMS=4000,
+                **motor_kwargs,
             )
             # Verify connectivity
             await cls._client.admin.command("ping")

@@ -70,7 +70,7 @@ def synthetic_video_with_audio_path(temp_test_dir: Path, synthetic_video_path: P
         "-y",
         "-i", str(synthetic_video_path),
         "-f", "lavfi",
-        "-i", "anullsrc=r=16000:cl=mono",
+        "-i", "sine=frequency=440:duration=3",
         "-c:v", "copy",
         "-c:a", "aac",
         "-shortest",

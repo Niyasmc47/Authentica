@@ -1,6 +1,10 @@
+import asyncio
+import os
+import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 
 from app.core.config import settings
 from app.core.logging import logger
@@ -22,6 +26,48 @@ from app.utils.ffmpeg import check_ffmpeg_available
 from app.db import DatabaseService, FeedbackPayload
 
 router = APIRouter()
+
+# In-memory client IP rate limiter (Phase 18 security)
+_RATE_LIMIT_MAX_REQUESTS = 30
+_RATE_LIMIT_WINDOW_SECONDS = 60.0
+_client_request_history = defaultdict(list)
+
+# Concurrency semaphore: protect CPU from starvation under burst concurrent analyses (P1.12)
+_ANALYSIS_SEMAPHORE = asyncio.Semaphore(2)
+
+
+def get_client_ip(request: Request) -> str:
+    """
+    Secure client IP resolution:
+    Only trust CF-Connecting-IP / X-Forwarded-For when Cloudflare CF-Ray header is present;
+    otherwise fallback to direct client socket host.
+    """
+    cf_ray = request.headers.get("CF-Ray") or request.headers.get("cf-ray")
+    if cf_ray:
+        cf_ip = request.headers.get("CF-Connecting-IP") or request.headers.get("cf-connecting-ip")
+        if cf_ip:
+            return cf_ip.strip()
+        xfwd = request.headers.get("X-Forwarded-For") or request.headers.get("x-forwarded-for")
+        if xfwd:
+            return xfwd.split(",")[0].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+
+def check_rate_limit(request: Request) -> None:
+    """Enforces client IP rate limits in-memory without external cache dependencies."""
+    client_ip = get_client_ip(request)
+    now = time.time()
+    # Retain only timestamps within the rolling window
+    timestamps = [ts for ts in _client_request_history[client_ip] if now - ts < _RATE_LIMIT_WINDOW_SECONDS]
+    if len(timestamps) >= _RATE_LIMIT_MAX_REQUESTS:
+        _client_request_history[client_ip] = timestamps
+        logger.warning(f"Rate limit exceeded for IP: {client_ip}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded. Maximum 30 analysis requests per minute allowed.",
+        )
+    timestamps.append(now)
+    _client_request_history[client_ip] = timestamps
 
 
 def get_analysis_service() -> AnalysisService:
@@ -105,8 +151,21 @@ async def record_feedback(
         )
 
 
+def verify_admin_access(request: Request) -> None:
+    """Optional admin security: requires X-Admin-Key if ADMIN_API_KEY is configured."""
+    admin_key = getattr(settings, "ADMIN_API_KEY", None) or os.getenv("ADMIN_API_KEY")
+    if admin_key:
+        provided = request.headers.get("X-Admin-Key") or request.headers.get("Authorization")
+        if not provided or (provided != admin_key and f"Bearer {admin_key}" != provided):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unauthorized: invalid or missing admin API key.",
+            )
+
+
 @router.get(
     "/train/dataset",
+    dependencies=[Depends(verify_admin_access)],
     summary="Get verified active learning dataset",
     description="Lists all human-confirmed ground-truth training samples stored in MongoDB / local feedback archive."
 )
@@ -127,11 +186,14 @@ async def get_training_dataset(limit: int = 200):
     description="Uploads a media file, validates it, extracts frames/audio, calculates SHA-256, and returns Stage 1, 2, 3 results."
 )
 async def analyze_video(
+    request: Request,
     file: UploadFile = File(..., description="Video or audio file to inspect and analyze"),
     service: AnalysisService = Depends(get_analysis_service)
 ):
+    check_rate_limit(request)
     try:
-        result = await service.analyze_video(file)
+        async with _ANALYSIS_SEMAPHORE:
+            result = await service.analyze_video(file)
         await DatabaseService.save_analysis(result)
         return result
     except (InvalidFileExtensionError, InvalidMimeTypeError) as e:

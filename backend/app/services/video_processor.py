@@ -158,15 +158,45 @@ class VideoProcessor:
                     elif cv_frame_count > 0 and fps > 0:
                         duration_s = cv_frame_count / fps
 
+            # If duration or frame count is still unavailable, decode frames to establish true count and duration
+            if duration_s <= 0.0 or cv_frame_count <= 0:
+                logger.info(f"Duration unavailable from headers; performing decoder frame count fallback on {video_path.name}")
+                counted_frames = 0
+                while True:
+                    ret, _ = cap.read()
+                    if not ret:
+                        break
+                    counted_frames += 1
+
+                if counted_frames > 0:
+                    cv_frame_count = counted_frames
+                    duration_s = cv_frame_count / fps if fps > 0 else 0.0
+                    logger.info(f"Decoder fallback recovered {cv_frame_count} frames, duration: {duration_s:.2f}s")
+                    # Reopen VideoCapture for subsequent sampling
+                    cap.release()
+                    cap = cv2.VideoCapture(str(video_path.resolve()))
+
             if width <= 0 or height <= 0:
                 raise CorruptedVideoError("Invalid video dimensions (0x0). Video may be corrupted.")
 
-            # 3. Sample frames at ~1 FPS
+            # 3. Determine adaptive sampling rate based on video duration
+            if settings.ADAPTIVE_SAMPLING_ENABLED:
+                if duration_s > 0 and duration_s < 5.0:
+                    effective_sample_fps = settings.SHORT_VIDEO_FPS
+                elif duration_s >= 5.0 and duration_s < 12.0:
+                    effective_sample_fps = settings.MEDIUM_VIDEO_FPS
+                else:
+                    effective_sample_fps = settings.STANDARD_VIDEO_FPS
+            else:
+                effective_sample_fps = self.sample_fps
+
+            # Sample frames adaptively
             frame_samples = self._sample_frames(
                 cap=cap,
                 fps=fps,
                 total_frames=cv_frame_count,
-                frames_dir=frames_dir
+                frames_dir=frames_dir,
+                target_sample_fps=effective_sample_fps
             )
 
             if not frame_samples:
@@ -186,7 +216,7 @@ class VideoProcessor:
                 f"Video inspection: {width}x{height} @ {fps:.2f} FPS | "
                 f"Duration: {duration_s:.2f}s | Audio stream: {has_audio_stream}"
             )
-            logger.info(f"Extracted {len(frame_samples)} frame samples at ~{self.sample_fps} FPS.")
+            logger.info(f"Extracted {len(frame_samples)} frame samples at ~{effective_sample_fps:.1f} FPS (adaptive).")
 
         finally:
             cap.release()
@@ -271,14 +301,17 @@ class VideoProcessor:
         cap: cv2.VideoCapture,
         fps: float,
         total_frames: int,
-        frames_dir: Path
+        frames_dir: Path,
+        target_sample_fps: Optional[float] = None
     ) -> List[FrameSample]:
         """
-        Samples frames at approximately sample_fps (~1 FPS) and writes them to frames_dir.
-        Preserves timestamps accurately.
+        Samples frames at target_sample_fps (or self.sample_fps) and writes them to frames_dir.
+        Preserves timestamps accurately with MAX_SAMPLED_FRAMES computational safety limit.
         """
         samples: List[FrameSample] = []
-        frame_interval = max(1, round(fps / self.sample_fps))
+        eff_fps = target_sample_fps or self.sample_fps
+        frame_interval = max(1, round(fps / eff_fps))
+        max_samples = getattr(settings, "MAX_SAMPLED_FRAMES", 60)
 
         frame_idx = 0
         sample_count = 0
@@ -309,6 +342,10 @@ class VideoProcessor:
                     sample_count += 1
                 else:
                     logger.warning(f"Failed to write frame to {frame_path}")
+
+                if sample_count >= max_samples:
+                    logger.info(f"Reached maximum frame sample limit ({max_samples}). Halting sampling.")
+                    break
 
             frame_idx += 1
 

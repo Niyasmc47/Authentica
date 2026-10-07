@@ -142,3 +142,51 @@ async def test_audio_detector_corrupted_file(audio_detector, dummy_video_info, t
     assert result.available is False
     assert result.status == "error"
     assert len(result.results) == 0
+
+
+def test_aasist_polarity_and_synthetic_detection(audio_detector):
+    """
+    Empirically verifies AASIST class ordering:
+    - Index 0 = Spoof (synthetic/unnatural waveforms get high spoof score)
+    - Index 1 = Bonafide
+    """
+    sr = 16000
+    t = np.linspace(0, 4.0, int(sr * 4.0), endpoint=False, dtype=np.float32)
+    # 440 Hz synthetic sine tone
+    sine = (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+    score = audio_detector.predict_window(sine)
+    assert score is not None
+    assert score > 0.80, f"Expected synthetic tone to yield high spoof_score (>0.80), got {score}"
+
+
+@pytest.mark.asyncio
+async def test_audio_detector_silence_returns_none(audio_detector, tmp_path):
+    """
+    Verifies that silence (< -45 dBFS) is excluded with status='insufficient_speech'
+    and spoof_score=None (never fabricated 0.02 authenticity score).
+    """
+    sr = 16000
+    silent_audio = np.zeros(sr * 4, dtype=np.float32)
+    score = audio_detector.predict_window(silent_audio)
+    assert score is None, f"Expected None on silence, got {score}"
+
+    wav_path = tmp_path / "silence.wav"
+    sf.write(str(wav_path), silent_audio, sr, subtype="PCM_16")
+
+    video_info = VideoInfo(
+        filename="silence.mp4",
+        sha256="abc1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd",
+        duration_s=4.0,
+        fps=30.0,
+        width=640,
+        height=480,
+        frames_sampled=4,
+        audio_available=True,
+    )
+    result = await audio_detector.analyze(audio_path=wav_path, video_info=video_info)
+    assert result.available is True
+    assert len(result.results) > 0
+    for w in result.results:
+        assert w.spoof_score is None
+        assert w.status == "insufficient_speech"
+

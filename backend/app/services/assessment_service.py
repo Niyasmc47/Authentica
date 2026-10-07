@@ -52,18 +52,28 @@ class AssessmentService:
 
         # 1. Determine Media Manipulation Verdict strictly based on Stage 2 rules
         if rel_level == "LOW":
+            # Genuine media quality degradation, corruption, or execution failure
             media_verdict = "UNCERTAIN"
         elif visual_level == "HIGH" and audio_level == "HIGH":
+            # CASE B: Multi-modal high-confidence synthetic manipulation (face swap + voice clone)
             media_verdict = "LIKELY_MANIPULATED"
         elif visual_level == "HIGH" or audio_level == "HIGH":
+            # CASE A: Strong persistent single-modality manipulation (visual face swap or audio clone)
             media_verdict = "SUSPICIOUS"
-        elif visual_level == "MEDIUM" and audio_level == "MEDIUM":
+        elif visual_level == "MEDIUM" or audio_level == "MEDIUM":
+            # Moderate / borderline forensic anomalies observed
             media_verdict = "SUSPICIOUS"
         elif visual_level == "LOW" and (audio_level == "LOW" or audio_level == "N/A") and rel_level == "OK":
+            # CASE C: Clean authentic media across available modalities
             media_verdict = "NO_STRONG_EVIDENCE"
         elif audio_level == "LOW" and (visual_level == "LOW" or visual_level == "N/A") and rel_level == "OK":
+            # CASE C: Clean authentic media across available modalities
             media_verdict = "NO_STRONG_EVIDENCE"
+        elif visual_level == "N/A" and audio_level == "N/A":
+            # CASE D: Genuinely insufficient modality data (no faces and no audio track)
+            media_verdict = "UNCERTAIN"
         else:
+            # CASE D: Genuinely unresolvable or degraded evidence
             media_verdict = "UNCERTAIN"
 
         # 2. Determine Fraud Intent Level
@@ -111,21 +121,48 @@ class AssessmentService:
 
         # 1. Reliability Context
         if matrix.reliability.level == "LOW":
-            rel_details = "; ".join(matrix.reliability.reasons) if matrix.reliability.reasons else "Quality criteria not met"
-            reasons.append(f"Media quality or detector execution was degraded ({rel_details}), resulting in an UNCERTAIN assessment.")
+            has_sample_issue = any("sample size" in r.lower() or "usable face" in r.lower() for r in matrix.reliability.reasons)
+            if has_sample_issue:
+                n_faces = matrix.visual.statistics.valid_frame_count if matrix.visual.statistics else 0
+                n_sampled = matrix.metadata.frames_sampled or len(timeline)
+                if n_sampled > 0:
+                    reasons.append(
+                        f"Only {n_faces} of {n_sampled} sampled frames contained usable faces, "
+                        f"so visual evidence is insufficient for a confident assessment."
+                    )
+                else:
+                    reasons.append(
+                        "Visual analysis produced ambiguous evidence from a small number of usable facial observations, resulting in an UNCERTAIN assessment."
+                    )
+            else:
+                rel_details = "; ".join(matrix.reliability.reasons) if matrix.reliability.reasons else "Quality criteria not met"
+                reasons.append(f"Media quality or detector execution was degraded ({rel_details}), resulting in an UNCERTAIN assessment.")
 
         # 2. Visual Modality
-        if matrix.visual.level == "HIGH":
-            reasons.append("Visual detector identified high-confidence facial manipulation artifacts across analyzed video frames.")
-        elif matrix.visual.level == "MEDIUM":
-            reasons.append("Visual detector observed moderate/borderline facial anomalies in sampled frames.")
-        elif matrix.visual.level == "LOW":
-            reasons.append("Visual detector found no significant synthetic facial artifacts in analyzed frames.")
-        elif matrix.visual.level == "N/A":
-            if matrix.metadata.media_type == "AUDIO":
-                reasons.append("Visual facial manipulation detection is not applicable for audio-only media.")
-            else:
-                reasons.append("Visual facial manipulation detection was not applicable (no faces detected or detector unavailable).")
+        if media_verdict == "UNCERTAIN" and matrix.reliability.level == "LOW":
+            if matrix.visual.level == "HIGH":
+                reasons.append("Visual detector observed elevated anomaly signals, but insufficient sample size or degraded quality precludes a definitive manipulation verdict.")
+            elif matrix.visual.level == "MEDIUM":
+                reasons.append("Visual detector observed moderate/borderline facial anomalies in sampled frames.")
+            elif matrix.visual.level == "LOW":
+                reasons.append("Visual detector found no significant synthetic facial artifacts in analyzed frames.")
+            elif matrix.visual.level == "N/A":
+                if matrix.metadata.media_type == "AUDIO":
+                    reasons.append("Visual facial manipulation detection is not applicable for audio-only media.")
+                else:
+                    reasons.append("Visual facial manipulation detection was not applicable (no faces detected or detector unavailable).")
+        else:
+            if matrix.visual.level == "HIGH":
+                reasons.append("Visual detector identified persistent, high-confidence facial manipulation artifacts across analyzed video frames.")
+            elif matrix.visual.level == "MEDIUM":
+                reasons.append("Visual detector observed moderate/borderline facial anomalies in sampled frames.")
+            elif matrix.visual.level == "LOW":
+                reasons.append("Visual detector found no significant synthetic facial artifacts in analyzed frames.")
+            elif matrix.visual.level == "N/A":
+                if matrix.metadata.media_type == "AUDIO":
+                    reasons.append("Visual facial manipulation detection is not applicable for audio-only media.")
+                else:
+                    reasons.append("Visual facial manipulation detection was not applicable (no faces detected or detector unavailable).")
 
         # 3. Audio Modality
         if matrix.audio.level == "HIGH":
@@ -138,7 +175,7 @@ class AssessmentService:
             reasons.append("Audio anti-spoofing was not applicable (no audio stream present or detector unavailable).")
 
         # 3b. Modality Synthesis
-        if matrix.visual.level == "HIGH" and matrix.audio.level == "HIGH":
+        if matrix.visual.level == "HIGH" and matrix.audio.level == "HIGH" and media_verdict == "LIKELY_MANIPULATED":
             reasons.append("Multi-modal synthesis detected: both visual and audio evidence independently indicate manipulation or synthesis.")
         elif media_verdict == "NO_STRONG_EVIDENCE":
             reasons.append("No strong indicators of manipulation or synthetic alteration were found across available modalities.")
@@ -179,6 +216,15 @@ class AssessmentService:
             reasons.append(
                 "Media shows signs of manipulation or synthesis; exercise caution and verify source authenticity before sharing or acting."
             )
+        elif action == "VERIFY":
+            if media_verdict == "UNCERTAIN" and (fraud is None or fraud.level == "LOW"):
+                reasons.append(
+                    "The verification recommendation is due to uncertainty in media authenticity, not because a fraud request was detected."
+                )
+            else:
+                reasons.append(
+                    "Moderate anomalies observed; verify sender identity through an established secondary channel."
+                )
         elif action == "NO_ACTION_FLAGGED":
             reasons.append(
                 "No strong manipulation or fraudulent intent was identified in the analyzed content."

@@ -38,11 +38,11 @@
         <button id="btnCloseSettings" class="close-btn">&times;</button>
       </div>
       <div class="drawer-body">
-        <label for="inputApiUrl" class="field-label">API Server URL</label>
-        <input type="text" id="inputApiUrl" class="text-input" placeholder="http://localhost:8000" />
+        <label for="inputApiUrl" class="field-label">API Backend URL (Tunnel / Laptop)</label>
+        <input type="text" id="inputApiUrl" class="text-input" placeholder="https://glory-rats-starter-deadline.trycloudflare.com" />
 
-        <label for="inputWebAppUrl" class="field-label">Web App URL</label>
-        <input type="text" id="inputWebAppUrl" class="text-input" placeholder="http://localhost:3000" />
+        <label for="inputWebAppUrl" class="field-label">Web App URL (Vercel Deployment)</label>
+        <input type="text" id="inputWebAppUrl" class="text-input" placeholder="https://authenticax-two.vercel.app" />
 
         <div class="drawer-actions">
           <button id="btnSaveSettings" class="btn-primary">Save Settings</button>
@@ -75,7 +75,7 @@
           <span>🛡️ Turn On Protection</span>
         </button>
         <button id="btnQuickScan" class="btn-secondary">
-          <span>⚡ Quick Scan (4s)</span>
+          <span>⚡ Quick Scan (12s)</span>
         </button>
       </section>
 
@@ -165,7 +165,7 @@
       <!-- VIEW 4: QUICK SCAN RUNNING -->
       <section id="viewScanning" class="view-card hidden">
         <div class="countdown-circle">
-          <span id="countdownVal">4</span>
+          <span id="countdownVal">12</span>
           <span class="countdown-unit">sec</span>
         </div>
         <h2 id="scanningTitle" class="view-title">Capturing Tab Media</h2>
@@ -181,10 +181,10 @@
             <path d="m9 12 2 2 4-4"/>
           </svg>
         </div>
-        <div class="safe-badge">🟢 NO THREAT DETECTED</div>
-        <div class="action-banner-text text-green">NO ACTION FLAGGED</div>
-        <p class="view-desc">
-          Analyzed sampled frames and audio track. No synthetic facial manipulation or coercive fraud patterns were detected.
+        <div id="cleanBadgeText" class="safe-badge">🟢 NO THREAT DETECTED</div>
+        <div id="cleanActionBanner" class="action-banner-text text-green">NO ACTION FLAGGED</div>
+        <p id="cleanDescText" class="view-desc">
+          Analyzed sampled frames and audio track. No coercive fraud or extortion patterns were detected.
         </p>
         <button id="btnOpenCleanReport" class="btn-primary btn-glow">
           <span>📄 View Full Forensic Report ↗</span>
@@ -216,7 +216,7 @@
     <footer class="footer">
       <div class="node-status">
         <span class="status-dot"></span>
-        <span id="backendStatusLabel">localhost:8000</span>
+        <span id="backendStatusLabel">Connecting...</span>
       </div>
       <button id="btnOpenWeb" class="link-btn" title="Open Authentica Dashboard">Web App ↗</button>
     </footer>

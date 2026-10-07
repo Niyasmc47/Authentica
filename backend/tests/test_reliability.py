@@ -147,3 +147,56 @@ def test_reliability_gate_model_error():
     result = service.evaluate(video_info, visual, audio)
     assert result.level == "LOW"
     assert any("Visual deepfake detector encountered an execution error" in r for r in result.reasons)
+
+
+def test_reliability_gate_small_face_pixel_size():
+    from app.schemas.analysis import VisualFrameResult
+    service = ReliabilityService()
+    video_info = VideoInfo(
+        filename="small_face.mp4",
+        sha256="abc123",
+        duration_s=10.0,
+        fps=30.0,
+        width=1280,
+        height=720,
+        frames_sampled=5,
+        audio_available=True,
+    )
+    # Face detections with pixel size < 48px
+    frames = [
+        VisualFrameResult(timestamp_s=i, face_detected=True, fake_score=0.75, face_pixel_size=32)
+        for i in range(5)
+    ]
+    visual = VisualResult(available=True, status="completed", frames_analyzed=5, faces_found=5, face_detection_rate=1.0, results=frames)
+    audio = AudioResult(available=True, status="completed")
+
+    result = service.evaluate(video_info, visual, audio)
+    assert result.level == "LOW"
+    assert any("below minimum forensic resolution (48px)" in r for r in result.reasons)
+
+
+def test_reliability_gate_blurry_faces():
+    from app.schemas.analysis import VisualFrameResult
+    service = ReliabilityService()
+    video_info = VideoInfo(
+        filename="blurry.mp4",
+        sha256="abc123",
+        duration_s=10.0,
+        fps=30.0,
+        width=1280,
+        height=720,
+        frames_sampled=5,
+        audio_available=True,
+    )
+    # Face detections with severe blur (blur_score < 40)
+    frames = [
+        VisualFrameResult(timestamp_s=i, face_detected=True, fake_score=0.8, face_pixel_size=100, blur_score=22.0)
+        for i in range(5)
+    ]
+    visual = VisualResult(available=True, status="completed", frames_analyzed=5, faces_found=5, face_detection_rate=1.0, results=frames)
+    audio = AudioResult(available=True, status="completed")
+
+    result = service.evaluate(video_info, visual, audio)
+    assert result.level == "LOW"
+    assert any("optical defocus or motion blur detected" in r for r in result.reasons)
+

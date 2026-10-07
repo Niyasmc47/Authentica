@@ -71,3 +71,47 @@ def test_c2pa_manifest_valid_but_untrusted(mock_try_create, tmp_path):
     assert res.trusted is False
     assert res.signer == "Unknown Actor Org"
     assert "not on the configured trust list" in res.note
+
+
+@patch("c2pa.Reader.try_create")
+def test_c2pa_manifest_invalid_signature(mock_try_create, tmp_path):
+    video_file = tmp_path / "tampered_signed.mp4"
+    video_file.write_bytes(b"dummy tampered data")
+
+    mock_reader = MagicMock()
+    mock_reader.get_validation_state.return_value = "Invalid: signature mismatch"
+    mock_reader.json.return_value = '{"active_manifest": "m1", "manifests": {"m1": {"signature_info": {"issuer": "Adobe Inc."}}}}'
+    mock_try_create.return_value = mock_reader
+
+    service = C2PAService(trusted_signers=["Adobe"])
+    res = service.inspect(video_file)
+
+    assert res.state == "FOUND"
+    assert res.valid is False
+    assert res.trusted is False
+    assert "signature validation failed" in res.note.lower()
+
+
+@patch("c2pa.Reader.try_create")
+def test_c2pa_manifest_ai_generation_declared(mock_try_create, tmp_path):
+    video_file = tmp_path / "ai_gen.mp4"
+    video_file.write_bytes(b"dummy ai data")
+
+    mock_reader = MagicMock()
+    mock_reader.get_validation_state.return_value = "Valid"
+    mock_reader.json.return_value = (
+        '{"active_manifest": "m1", "manifests": {"m1": {'
+        '"signature_info": {"issuer": "OpenAI"}, '
+        '"assertions": [{"label": "c2pa.actions", "data": {"actions": [{"action": "c2pa.created", "digitalSourceType": "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia"}]}}]'
+        '}}}'
+    )
+    mock_try_create.return_value = mock_reader
+
+    service = C2PAService(trusted_signers=["OpenAI"])
+    res = service.inspect(video_file)
+
+    assert res.state == "FOUND"
+    assert res.valid is True
+    assert res.trusted is True
+    assert res.ai_generated is True
+    assert "declaring ai/algorithmic media generation" in res.note.lower()

@@ -439,15 +439,15 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
             - ~0.0: High likelihood of genuine / bonafide human voice
             
         Returns:
-            spoof_score (float in [0.0, 1.0])
+            spoof_score (float in [0.0, 1.0]) or None if insufficient speech / silent.
         """
         if self.model is None:
             raise RuntimeError("AASIST model is not loaded. Call load() first.")
 
         rms_db, _ = self._compute_acoustic_indicators(audio_slice)
-        # Silence / ambient noise floor without vocal energy is not evidence of voice cloning
+        # Silence / ambient noise floor without vocal energy is NOT analyzed (no fabricated authenticity)
         if rms_db < -45.0:
-            return 0.02
+            return None
 
         tensor = self._prepare_window_tensor(audio_slice)
         with torch.no_grad():
@@ -455,17 +455,10 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
             scaled_logits = logits / 1.15
             probs = torch.softmax(scaled_logits, dim=-1)[0]
             # Official AASIST architecture & ASVspoof 2019 LA protocol:
-            # Index 0 = Bonafide (Real/Genuine human voice), Index 1 = Spoof (Synthetic/Cloned voice)
-            raw_spoof = float(probs[1].item())
+            # Index 0 = Spoof (Synthetic/Cloned voice), Index 1 = Bonafide (Real/Genuine human voice)
+            raw_spoof = float(probs[0].item())
 
-        _, spectral_anomaly = self._compute_acoustic_indicators(audio_slice)
-        # Calibrate against acoustic frequency roll-off
-        if spectral_anomaly > 0.50:
-            spoof_score = round(min(0.99, raw_spoof * 0.7 + spectral_anomaly * 0.3), 4)
-        else:
-            spoof_score = round(raw_spoof, 4)
-
-        return spoof_score
+        return round(raw_spoof, 4)
 
     async def analyze(
         self,
@@ -553,14 +546,25 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
         if duration_s <= self.window_duration_s:
             # Single window covering full duration
             try:
+                rms_db, _ = self._compute_acoustic_indicators(audio_data)
                 score = self.predict_window(audio_data)
+                status = "analyzed" if score is not None else "insufficient_speech"
                 results.append(AudioWindowResult(
                     start_s=0.0,
                     end_s=round(duration_s, 2),
-                    spoof_score=score
+                    spoof_score=score,
+                    status=status,
+                    rms_db=round(rms_db, 1)
                 ))
             except Exception as e:
                 logger.warning(f"Error predicting short audio window: {e}")
+                results.append(AudioWindowResult(
+                    start_s=0.0,
+                    end_s=round(duration_s, 2),
+                    spoof_score=None,
+                    status="error",
+                    rms_db=None
+                ))
         else:
             cur_start_samp = 0
             while cur_start_samp < total_samples:
@@ -570,18 +574,24 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
 
                 slice_data = audio_data[cur_start_samp:cur_end_samp]
                 try:
+                    rms_db, _ = self._compute_acoustic_indicators(slice_data)
                     score = self.predict_window(slice_data)
+                    status = "analyzed" if score is not None else "insufficient_speech"
                     results.append(AudioWindowResult(
                         start_s=start_s,
                         end_s=end_s,
-                        spoof_score=score
+                        spoof_score=score,
+                        status=status,
+                        rms_db=round(rms_db, 1)
                     ))
                 except Exception as e:
                     logger.warning(f"Error analyzing audio window [{start_s}s - {end_s}s]: {e}")
                     results.append(AudioWindowResult(
                         start_s=start_s,
                         end_s=end_s,
-                        spoof_score=None
+                        spoof_score=None,
+                        status="error",
+                        rms_db=None
                     ))
 
                 cur_start_samp += stride_samples

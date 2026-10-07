@@ -10,6 +10,9 @@
  */
 
 import {
+  CAPTURE_DURATION_MS,
+  DEFAULT_API_URL,
+  DEFAULT_WEB_APP_URL,
   MESSAGE_TYPES,
   MONITORING_STATES,
   OFFSCREEN_DOCUMENT_PATH,
@@ -32,7 +35,7 @@ let state = {
   // Quick scan mode
   quickScan: {
     state: POPUP_STATES.IDLE,
-    secondsRemaining: 4,
+    secondsRemaining: Math.ceil(CAPTURE_DURATION_MS / 1000),
     tabId: null,
     tabTitle: '',
     tabUrl: '',
@@ -43,8 +46,12 @@ let state = {
 };
 
 // Initialize extension lifecycle
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   console.info('[Authentica Service Worker] Installed.');
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.API_URL]: DEFAULT_API_URL,
+    [STORAGE_KEYS.WEB_APP_URL]: DEFAULT_WEB_APP_URL,
+  });
   saveStateToStorage();
 });
 
@@ -213,14 +220,14 @@ async function startMonitoringOnTab(tabId, tabTitle, tabUrl, preAcquiredStreamId
 function handleMonitoringChunkResult({ summary, raw }) {
   if (!state.monitoringActive || !summary) return;
 
-  const isRisk = evaluateRisk(summary, raw);
+  const isHarmfulFraud = summary.fraudLevel === 'HIGH' || summary.fraudLevel === 'CRITICAL' || summary.action === 'STOP_AND_VERIFY' || Boolean(summary.requestedAction);
+  const isDeepfake = summary.visualIsDeepfake || (summary.visualLevel === 'HIGH' && summary.visualManipulationProb >= 0.70) || summary.audioIsSpoof || summary.mediaVerdict === 'LIKELY_MANIPULATED';
 
-  if (isRisk) {
-    // THREAT DETECTED: Immediately alert the user!
-    console.warn('[Service Worker] THREAT DETECTED on monitored tab:', summary);
+  if (isHarmfulFraud) {
+    // 1. HARMFUL FRAUD DETECTED: Immediately alert the user on screen and via notification!
+    console.warn('[Service Worker] HARMFUL FRAUD DETECTED on monitored tab:', summary);
     state.monitoringStatus = MONITORING_STATES.THREAT_ALERT;
     state.activeThreat = summary;
-
     setBadgeRisk();
 
     // Trigger in-tab floating alert banner on the active web page
@@ -230,16 +237,26 @@ function handleMonitoringChunkResult({ summary, raw }) {
 
     // Trigger desktop notification
     if (chrome.notifications && chrome.notifications.create) {
-      chrome.notifications.create({
-        type: 'basic',
-        iconUrl: 'icons/icon128.png',
-        title: '⚠️ Authentica Deepfake Alert',
-        message: `High risk detected on "${state.monitoredTabTitle}": ${summary.action || 'VERIFY'}`,
-        priority: 2,
-      });
+      try {
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+          title: '🚨 Authentica Fraud & Scam Alert',
+          message: `Harmful directive detected on "${state.monitoredTabTitle}": ${summary.requestedAction || 'STOP AND VERIFY'}`,
+          priority: 2,
+        });
+      } catch (notifErr) {
+        console.warn('[Service Worker] Notification display error:', notifErr);
+      }
     }
+  } else if (isDeepfake) {
+    // 2. DEEPFAKE DETECTED (WITHOUT FRAUD): Warn inside extension popup on click, without disruptive screen popups
+    console.info('[Service Worker] Deepfake detected (no fraud intent):', summary);
+    state.activeThreat = summary;
+    state.monitoringStatus = MONITORING_STATES.THREAT_ALERT;
+    setBadgeWarning();
   } else {
-    // SAFE: Stay quiet! Increment cycle count and keep silent protection running
+    // 3. SAFE / NORMAL MEDIA: Silent protection running
     state.monitoringStatus = MONITORING_STATES.MONITORING_SAFE;
     state.cyclesCompleted += 1;
     state.lastCheckTime = Date.now();
@@ -314,6 +331,10 @@ async function injectThreatOverlay(tabId, summary) {
         const actionText = threatData.action || 'VERIFY';
         const actionColor = actionText === 'STOP_AND_VERIFY' ? '#ef4444' : (actionText === 'CAUTION' ? '#f59e0b' : '#38bdf8');
 
+        const reportUrl = (threatData.fullReportUrl && !threatData.fullReportUrl.includes('localhost') && !threatData.fullReportUrl.includes('127.0.0.1'))
+          ? threatData.fullReportUrl
+          : `https://authenticax-two.vercel.app/results/${threatData.id}`;
+
         overlay.innerHTML = `
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
             <div style="display:flex; align-items:center; gap:6px; font-weight:800; font-size:11px; letter-spacing:0.06em; color:#ef4444;">
@@ -342,7 +363,7 @@ async function injectThreatOverlay(tabId, summary) {
           </div>
 
           <div style="display:flex; gap:8px;">
-            <a href="${threatData.fullReportUrl}" target="_blank" style="flex:1; background:#06b6d4; color:#030712; text-decoration:none; padding:8px 12px; border-radius:6px; font-weight:700; font-size:11.5px; text-align:center; display:block; transition:background 0.2s;">
+            <a href="${reportUrl}" target="_blank" style="flex:1; background:#06b6d4; color:#030712; text-decoration:none; padding:8px 12px; border-radius:6px; font-weight:700; font-size:11.5px; text-align:center; display:block; transition:background 0.2s;">
               Inspect Evidence Matrix ↗
             </a>
           </div>
@@ -371,22 +392,29 @@ async function injectThreatOverlay(tabId, summary) {
 }
 
 /**
- * Determines whether a clip exhibits forensic deepfake or social engineering fraud risk.
+ * Determines whether a clip exhibits active fraud / harm risk requiring an in-tab alert popup.
+ *
+ * STRICT CRITERION:
+ * - Disruptive on-screen popups and desktop notifications are ONLY triggered for actual fraud/harm
+ *   (e.g., OTP extraction, money transfer requests, remote desktop takeover, extortion).
+ * - Low-resolution video, blur, or synthetic media without harmful intent will NEVER trigger screen popups.
  */
 function evaluateRisk(summary, raw) {
   if (!summary) return false;
 
-  // 1. High risk backend action directive
-  if (summary.action === 'STOP_AND_VERIFY' || summary.action === 'CAUTION') return true;
+  // 1. Direct coercive directives (OTP theft, money demands, remote software)
+  if (summary.requestedAction) return true;
 
-  // 2. High confidence deepfake findings
-  if (summary.mediaVerdict === 'LIKELY_MANIPULATED') return true;
+  // 2. High or Critical fraud intent level
+  if (summary.fraudLevel === 'HIGH' || summary.fraudLevel === 'CRITICAL') return true;
+
+  // 3. STOP_AND_VERIFY directive from backend (triggered on high fraud intent)
+  if (summary.action === 'STOP_AND_VERIFY') return true;
+
+  // 4. High-confidence synthetic deepfake face or voice clone (e.g., Morgan Freeman face-swap)
   if (summary.visualIsDeepfake || (summary.visualLevel === 'HIGH' && summary.visualManipulationProb >= 0.70)) return true;
   if (summary.audioIsSpoof || (summary.audioLevel === 'HIGH' && summary.audioSpoofProb >= 0.70)) return true;
-
-  // 3. Fraud intent & social engineering
-  if (summary.fraudLevel === 'HIGH' || summary.fraudLevel === 'CRITICAL') return true;
-  if (summary.requestedAction) return true;
+  if (summary.mediaVerdict === 'LIKELY_MANIPULATED') return true;
 
   return false;
 }
@@ -422,7 +450,7 @@ async function handleStartQuickScan({ tabId, tabTitle, tabUrl, streamId: preAcqu
 
   state.quickScan = {
     state: POPUP_STATES.CAPTURING,
-    secondsRemaining: 4,
+    secondsRemaining: Math.ceil(CAPTURE_DURATION_MS / 1000),
     tabId,
     tabTitle: tabTitle || 'Current Tab',
     tabUrl: tabUrl || '',
@@ -458,7 +486,7 @@ function handleCancelQuickScan() {
 function resetQuickScanState() {
   state.quickScan = {
     state: POPUP_STATES.IDLE,
-    secondsRemaining: 4,
+    secondsRemaining: Math.ceil(CAPTURE_DURATION_MS / 1000),
     tabId: null,
     tabTitle: '',
     tabUrl: '',
@@ -560,6 +588,13 @@ function setBadgeRisk() {
   try {
     chrome.action.setBadgeText({ text: 'RISK' });
     chrome.action.setBadgeBackgroundColor({ color: '#ef4444' }); // Red
+  } catch {}
+}
+
+function setBadgeWarning() {
+  try {
+    chrome.action.setBadgeText({ text: 'AI' });
+    chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' }); // Amber
   } catch {}
 }
 

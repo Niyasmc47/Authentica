@@ -231,7 +231,7 @@ function selectSupportedMimeType(hasVideo = true, hasAudio = true) {
  */
 function startSingleRecorder(mimeType, hasVideo = true) {
   recordingChunks = [];
-  const options = { mimeType };
+  const options = { mimeType, audioBitsPerSecond: 128000 };
   if (hasVideo) {
     options.videoBitsPerSecond = 2500000;
   }
@@ -327,7 +327,7 @@ function startContinuousMonitoringLoop(mimeType, hasVideo = true) {
 
   recordingChunks = [];
   try {
-    const options = { mimeType };
+    const options = { mimeType, audioBitsPerSecond: 128000 };
     if (hasVideo) {
       options.videoBitsPerSecond = 2000000;
     }

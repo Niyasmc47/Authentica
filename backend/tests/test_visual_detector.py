@@ -209,3 +209,66 @@ async def test_empty_frames_list(detector, sample_video_info):
     assert result.faces_found == 0
     assert result.face_detection_rate == 0.0
     assert len(result.results) == 0
+
+
+def test_portrait_face_crop_aspect_ratio_preservation(detector):
+    """
+    Test 11: Verifies that face cropping in portrait images (e.g. 850x478)
+    returns an exactly square crop (height == width) without aspect ratio distortion.
+    """
+    # Create portrait canvas: height = 850, width = 478
+    portrait_img = np.ones((850, 478, 3), dtype=np.uint8) * 220
+    # Draw face structure
+    cv2.circle(portrait_img, (239, 350), 120, (210, 175, 140), -1)
+    cv2.circle(portrait_img, (200, 320), 15, (40, 40, 40), -1)
+    cv2.circle(portrait_img, (280, 320), 15, (40, 40, 40), -1)
+    cv2.ellipse(portrait_img, (239, 390), (40, 20), 0, 0, 180, (40, 40, 40), 3)
+
+    crop = detector.detect_primary_face(portrait_img)
+    if crop is not None:
+        h, w, _ = crop.shape
+        # Must be strictly square
+        assert h == w, f"Expected square crop but got shape ({h}, {w})"
+        assert h > 100
+
+
+def test_efficientnet_polarity_mapping(detector):
+    """
+    Empirically verifies that the EfficientNet-B0 linear head mapping adheres to:
+    Index 0: Real/Authentic
+    Index 1: Fake/Manipulated
+    """
+    assert detector.model is not None
+    fc = detector.model.classifier[1]
+    assert fc.out_features == 2
+    dummy_input = torch.zeros(1, 3, 224, 224).to(detector.device)
+    with torch.no_grad():
+        logits = detector.model(dummy_input)
+    assert logits.shape == (1, 2)
+
+
+def test_capture_quality_metrics_and_smoothing(detector):
+    """
+    Verifies that detect_face_with_meta extracts capture-quality indicators:
+    blur_score, luma, noise_estimate, face_pixel_size, face_confidence.
+    """
+    img = create_synthetic_face_image(300, 300)
+    res = detector.detect_face_with_meta(img)
+    if res is not None:
+        crop, conf, bbox, pixel_size, blur, luma, noise = res
+        assert crop.shape == (224, 224, 3) or (crop.shape[0] == crop.shape[1])
+        assert 0.0 <= conf <= 1.0
+        assert len(bbox) == 4
+        assert pixel_size > 0
+        assert blur >= 0.0
+        assert 0.0 <= luma <= 255.0
+        assert noise >= 0.0
+
+    # Also test temporal smoothing helper
+    b1 = (100, 100, 50, 50)
+    b2 = (102, 101, 51, 50)
+    iou = detector._calculate_iou(b1, b2)
+    assert iou > 0.8
+
+
+

@@ -10,6 +10,13 @@ from .c2pa_service import C2PAService
 from .evidence_service import EvidenceService
 from .reliability_service import ReliabilityService
 from .timeline_service import TimelineService
+from .classification_rules import (
+    classify_score,
+    classify_visual_score,
+    classify_audio_score,
+    classify_visual_window_level,
+    aggregate_visual_window_bins,
+)
 from .video_processor import (
     CorruptedVideoError,
     VideoDurationExceededError,
@@ -34,4 +41,9 @@ __all__ = [
     "EvidenceService",
     "TimelineService",
     "AssessmentService",
+    "classify_score",
+    "classify_visual_score",
+    "classify_audio_score",
+    "classify_visual_window_level",
+    "aggregate_visual_window_bins",
 ]

@@ -6,6 +6,10 @@ from app.core.logging import logger
 from app.schemas.analysis import AudioResult, SpeechResult, VisualResult
 from app.schemas.fraud import FraudResult
 from app.schemas.timeline import TimelineEvent
+from app.services.classification_rules import (
+    aggregate_visual_window_bins,
+    classify_audio_score,
+)
 
 
 class TimelineService:
@@ -84,106 +88,28 @@ class TimelineService:
         video_duration_s: float
     ) -> List[TimelineEvent]:
         """
-        Groups ~1 FPS frame results into ~3-second windows and applies consecutive-window
-        noise filtering for high-confidence visual manipulation events.
+        Groups ~1 FPS frame results into ~3-second windows and generates timeline events
+        using unified classification rules with noise attenuation.
         """
         if not visual.available or not visual.results:
             return []
 
-        # Partition frames into discrete 3-second bins
-        num_windows = max(1, math.ceil(video_duration_s / self.window_duration_s))
-        raw_windows = []
+        raw_windows = aggregate_visual_window_bins(
+            results=visual.results,
+            video_duration_s=video_duration_s,
+            window_duration_s=self.window_duration_s,
+            visual_low=self.visual_low,
+            visual_high=self.visual_high,
+        )
 
-        for w_idx in range(num_windows):
-            w_start = round(w_idx * self.window_duration_s, 2)
-            w_end = round(min((w_idx + 1) * self.window_duration_s, video_duration_s), 2)
-
-            # Collect all frames strictly belonging to this time window
-            if w_idx == num_windows - 1:
-                frames_in_win = [
-                    f for f in visual.results
-                    if w_start <= f.timestamp_s <= w_end
-                ]
-            else:
-                frames_in_win = [
-                    f for f in visual.results
-                    if w_start <= f.timestamp_s < w_end
-                ]
-
-            valid_fake_scores = [
-                f.fake_score for f in frames_in_win
-                if f.face_detected is True and f.fake_score is not None
-            ]
-
-            if valid_fake_scores:
-                n_frames = len(valid_fake_scores)
-                sorted_scores = sorted(valid_fake_scores)
-                max_score = round(max(valid_fake_scores), 4)
-                mean_score = round(sum(valid_fake_scores) / n_frames, 4)
-                median_score = round(
-                    sorted_scores[n_frames // 2] if n_frames % 2 == 1 else (sorted_scores[n_frames // 2 - 1] + sorted_scores[n_frames // 2]) / 2.0,
-                    4
-                )
-                high_count = len([s for s in valid_fake_scores if s >= self.visual_high])
-                
-                # Robust window level assignment:
-                # A window is HIGH only if mean score is high, or multiple frames exceed threshold
-                if mean_score >= self.visual_high or (high_count >= 2 and mean_score >= 0.55) or (n_frames == 1 and max_score >= self.visual_high):
-                    raw_level = "HIGH"
-                elif mean_score >= self.visual_low or high_count >= 1 or max_score >= self.visual_high:
-                    raw_level = "MEDIUM"
-                else:
-                    raw_level = "LOW"
-
-                raw_windows.append({
-                    "start_s": w_start,
-                    "end_s": w_end,
-                    "score": mean_score,
-                    "max_score": max_score,
-                    "mean_score": mean_score,
-                    "median_score": median_score,
-                    "raw_level": raw_level,
-                    "frame_count": n_frames
-                })
-            else:
-                # No face detected in this window
-                raw_windows.append({
-                    "start_s": w_start,
-                    "end_s": w_end,
-                    "score": None,
-                    "max_score": None,
-                    "mean_score": None,
-                    "median_score": None,
-                    "raw_level": "N/A",
-                    "frame_count": 0
-                })
-
-        # Apply noise reduction:
-        # A single isolated HIGH window without an adjacent qualifying window (score >= visual_low)
-        # is downgraded to MEDIUM to prevent isolated false positives from dominating the timeline.
         events: List[TimelineEvent] = []
-        for i, win in enumerate(raw_windows):
-            level = win["raw_level"]
-
-            if level == "HIGH":
-                has_prev_qualifying = (
-                    i > 0 and raw_windows[i - 1]["score"] is not None and
-                    raw_windows[i - 1]["score"] >= self.visual_low
-                )
-                has_next_qualifying = (
-                    i < len(raw_windows) - 1 and raw_windows[i + 1]["score"] is not None and
-                    raw_windows[i + 1]["score"] >= self.visual_low
-                )
-                if not (has_prev_qualifying or has_next_qualifying) and len(raw_windows) > 1:
-                    # Isolated spike window: attenuate to MEDIUM
-                    level = "MEDIUM"
-
-            if level != "N/A" or win["frame_count"] > 0:
+        for win in raw_windows:
+            if win["level"] != "N/A" or win["frame_count"] > 0:
                 events.append(TimelineEvent(
                     start_s=win["start_s"],
                     end_s=win["end_s"],
                     kind="visual",
-                    level=level,
+                    level=win["level"],
                     evidence_source="visual_window",
                     score=win["score"],
                     details=f"Frames evaluated: {win['frame_count']}"
@@ -199,15 +125,7 @@ class TimelineService:
         events: List[TimelineEvent] = []
         for win in audio.results:
             score = win.spoof_score
-            if score is not None:
-                if score >= self.audio_high:
-                    level = "HIGH"
-                elif score >= self.audio_low:
-                    level = "MEDIUM"
-                else:
-                    level = "LOW"
-            else:
-                level = "N/A"
+            level = classify_audio_score(score) if score is not None else "N/A"
 
             events.append(TimelineEvent(
                 start_s=round(win.start_s, 2),
