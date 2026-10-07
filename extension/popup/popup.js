@@ -234,7 +234,7 @@ function applyGlobalState(state) {
     elements.scanningTitle.textContent = 'Capturing Tab Media';
     elements.scanningDesc.textContent = 'Audio playback remains audible while capturing...';
     if (elements.countdownVal) {
-      elements.countdownVal.textContent = state.quickScan.secondsRemaining || 12;
+      elements.countdownVal.textContent = state.quickScan.secondsRemaining || 10;
     }
     showView(elements.viewScanning);
     return;

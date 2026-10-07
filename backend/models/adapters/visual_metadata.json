@@ -2,10 +2,10 @@
   "base_model": "EfficientNet-B0-FFPP-C23",
   "base_model_version": "1.0.0",
   "base_model_checksum": "2a7963b787ece259",
-  "active_version": "visual-v7",
+  "active_version": "visual-v8",
   "visual_adapter_status": "ACTIVE",
   "audio_adapter_status": "BASE ONLY / NOT TRAINED",
-  "latest_update": "2026-10-07T04:49:50.455373+00:00",
+  "latest_update": "2026-10-07T05:02:37.819405+00:00",
   "history": [
     {
       "version": "visual-v1",
@@ -156,6 +156,35 @@
       "trainable_parameters": 84938,
       "param_checksum_before": "4d0d8a5480edfe87",
       "param_checksum_after": "8849c711acb51d03",
+      "parameters_changed": true
+    },
+    {
+      "version": "visual-v8",
+      "base_model": "EfficientNet-B0-FFPP-C23",
+      "base_model_version": "1.0.0",
+      "base_model_checksum": "2a7963b787ece259",
+      "dataset_version": "ds-v8",
+      "timestamp": "2026-10-07T05:02:37.819391+00:00",
+      "samples_used": 8,
+      "class_balance": {
+        "real": 8,
+        "fake": 0
+      },
+      "epochs_run": 15,
+      "initial_loss": 0.0557,
+      "final_loss": 0.0,
+      "accuracy": 1.0,
+      "balanced_accuracy": 0.5,
+      "confusion_matrix": {
+        "tp": 0,
+        "tn": 21,
+        "fp": 0,
+        "fn": 0
+      },
+      "status_note": "Validated split active",
+      "trainable_parameters": 84938,
+      "param_checksum_before": "8849c711acb51d03",
+      "param_checksum_after": "d0f0530848929b5b",
       "parameters_changed": true
     }
   ]

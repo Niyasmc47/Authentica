@@ -5,8 +5,8 @@
 export const DEFAULT_API_URL = 'https://anatomy-enemies-acoustic-grade.trycloudflare.com';
 export const DEFAULT_WEB_APP_URL = 'https://authenticax-two.vercel.app';
 
-// Fixed capture duration (12.0 seconds for robust conversational speech context)
-export const CAPTURE_DURATION_MS = 12000;
+// Fixed capture duration (10.0 seconds per cycle for balanced analysis and server throughput)
+export const CAPTURE_DURATION_MS = 10000;
 
 export const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
 

@@ -360,14 +360,21 @@ function startContinuousMonitoringLoop(mimeType, hasVideo = true) {
     const chunkBlob = new Blob(recordingChunks, { type: mimeType });
     recordingChunks = [];
 
-    // Immediately start recording NEXT chunk if monitoring is still active!
-    if (isMonitoringActive && currentMediaStream && currentMediaStream.active) {
-      startContinuousMonitoringLoop(mimeType, hasVideo);
+    // Process completed chunk and AWAIT backend response BEFORE starting next 10-second capture.
+    // This strictly prevents backend overload by ensuring only 1 analysis is in-flight at a time.
+    if (chunkBlob.size > 0) {
+      console.info('[Offscreen] 10s chunk recorded. Uploading to backend and awaiting response...');
+      try {
+        await processMonitoringChunk(chunkBlob);
+      } catch (err) {
+        console.warn('[Offscreen] Chunk processing error:', err);
+      }
     }
 
-    // Process completed chunk asynchronously in background
-    if (chunkBlob.size > 0) {
-      processMonitoringChunk(chunkBlob);
+    // ONLY after the backend forensic result arrives, start recording the next 10-second chunk!
+    if (isMonitoringActive && currentMediaStream && currentMediaStream.active) {
+      console.info('[Offscreen] Backend result received. Starting next 10s capture cycle...');
+      startContinuousMonitoringLoop(mimeType, hasVideo);
     }
   }, CAPTURE_DURATION_MS);
 }
