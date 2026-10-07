@@ -178,19 +178,19 @@ The system takes **video or audio files** (via web upload, API stream, or real-t
 
 ### Main Interface
 
-![Main Interface](screenshots/results_dashboard.png)
+![Main Interface]()
 
 *Main interface showing dual-axis risk verdict, orthogonal risk badges, and interactive multi-modal timeline.*
 
 ### Detection / Analysis
 
-![Detection](screenshots/forensic_analysis.png)
+![Detection](
 
 *Forensic analysis breakdown displaying frame-by-frame visual manipulation scores, face detection bounding boxes, and active learning adapter telemetry.*
 
 ### Results & Browser Extension
 
-![Results](screenshots/extension_preview.png)
+![Results]()
 
 *Authentica Chrome Extension providing seamless in-browser video inspection on social and messaging platforms.*
 
