@@ -1,0 +1,72 @@
+{
+  "base_model": "EfficientNet-B0-FFPP-C23",
+  "base_model_version": "1.0.0",
+  "active_version": "visual-v4",
+  "latest_update": "2026-10-07T03:35:46.668467+00:00",
+  "history": [
+    {
+      "version": "visual-v1",
+      "base_model": "EfficientNet-B0-FFPP-C23",
+      "base_model_version": "1.0.0",
+      "dataset_version": "ds-v1",
+      "timestamp": "2026-10-07T03:17:54.164324+00:00",
+      "samples_used": 1,
+      "epochs_run": 5,
+      "initial_loss": 0.7327,
+      "final_loss": 0.0,
+      "loss_reduction": 0.7327,
+      "trainable_parameters": 84938,
+      "param_checksum_before": "243298c2ebc96a23",
+      "param_checksum_after": "ba76dacbc820ecdb",
+      "parameters_changed": true
+    },
+    {
+      "version": "visual-v2",
+      "base_model": "EfficientNet-B0-FFPP-C23",
+      "base_model_version": "1.0.0",
+      "dataset_version": "ds-v2",
+      "timestamp": "2026-10-07T03:18:15.247913+00:00",
+      "samples_used": 2,
+      "epochs_run": 5,
+      "initial_loss": 0.0523,
+      "final_loss": 0.0,
+      "loss_reduction": 0.0523,
+      "trainable_parameters": 84938,
+      "param_checksum_before": "ba76dacbc820ecdb",
+      "param_checksum_after": "a7812885824abd3f",
+      "parameters_changed": true
+    },
+    {
+      "version": "visual-v3",
+      "base_model": "EfficientNet-B0-FFPP-C23",
+      "base_model_version": "1.0.0",
+      "dataset_version": "ds-v3",
+      "timestamp": "2026-10-07T03:18:26.143467+00:00",
+      "samples_used": 3,
+      "epochs_run": 5,
+      "initial_loss": 0.0,
+      "final_loss": 0.0,
+      "loss_reduction": 0.0,
+      "trainable_parameters": 84938,
+      "param_checksum_before": "a7812885824abd3f",
+      "param_checksum_after": "05532fd978aa4410",
+      "parameters_changed": true
+    },
+    {
+      "version": "visual-v4",
+      "base_model": "EfficientNet-B0-FFPP-C23",
+      "base_model_version": "1.0.0",
+      "dataset_version": "ds-v4",
+      "timestamp": "2026-10-07T03:35:46.668449+00:00",
+      "samples_used": 4,
+      "epochs_run": 5,
+      "initial_loss": 0.0,
+      "final_loss": 0.0,
+      "loss_reduction": 0.0,
+      "trainable_parameters": 84938,
+      "param_checksum_before": "05532fd978aa4410",
+      "param_checksum_after": "1ebf4c0b131f8390",
+      "parameters_changed": true
+    }
+  ]
+}

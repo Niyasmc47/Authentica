@@ -32,6 +32,11 @@ class VisualFrameResult(BaseModel):
     face_detected: Optional[bool] = Field(None, description="Whether a face was detected in this frame")
     real_score: Optional[float] = Field(None, description="Confidence score for real/authentic face (0.0 to 1.0)")
     fake_score: Optional[float] = Field(None, description="Confidence score for synthetic/deepfake face (0.0 to 1.0)")
+    raw_real_score: Optional[float] = Field(None, description="Raw base model score for real class (EfficientNet)")
+    raw_fake_score: Optional[float] = Field(None, description="Raw base model score for fake class (EfficientNet)")
+    adapted_fake_score: Optional[float] = Field(None, description="Adapted score from Authentica adapter layer")
+    face_occupancy_pct: Optional[float] = Field(None, description="Percentage of crop area occupied by face bounding box")
+    context_margin_pct: Optional[float] = Field(None, description="Context margin percentage around face box")
     face_confidence: Optional[float] = Field(None, description="Detection confidence score of the face detector (0.0 to 1.0)")
     bounding_box: Optional[List[int]] = Field(None, description="[x, y, w, h] face bounding box in pixel coordinates")
     face_pixel_size: Optional[int] = Field(None, description="Face crop size in pixels (min(w, h))")
@@ -44,10 +49,12 @@ class VisualResult(BaseModel):
     """Aggregated visual / facial deepfake detection results (Member 2)."""
     available: bool = Field(False, description="Whether the visual detector is active and executed")
     model: Optional[str] = Field(None, description="Name and version of the visual detector model")
+    adapter_version: Optional[str] = Field(None, description="Active Authentica adaptation layer version")
     status: str = Field("unavailable", description="Status of the visual detector (e.g., unavailable, completed, error)")
     frames_analyzed: int = Field(0, description="Total number of frames analyzed")
     faces_found: int = Field(0, description="Total number of frames where faces were detected")
     face_detection_rate: Optional[float] = Field(None, description="Proportion of sampled frames containing faces")
+    average_face_occupancy_pct: Optional[float] = Field(None, description="Average percentage of crop occupied by face")
     results: List[VisualFrameResult] = Field(default_factory=list, description="Per-frame detection results")
 
 
@@ -56,6 +63,8 @@ class AudioWindowResult(BaseModel):
     start_s: float = Field(..., description="Start timestamp in seconds")
     end_s: float = Field(..., description="End timestamp in seconds")
     spoof_score: Optional[float] = Field(None, description="Voice spoofing / synthetic voice confidence score (0.0 to 1.0)")
+    raw_spoof_score: Optional[float] = Field(None, description="Raw base AASIST model spoof score")
+    adapted_spoof_score: Optional[float] = Field(None, description="Adapted audio spoof score")
     status: Optional[str] = Field("analyzed", description="Window status: 'analyzed' | 'insufficient_speech' | 'error'")
     rms_db: Optional[float] = Field(None, description="RMS energy level in dBFS")
 

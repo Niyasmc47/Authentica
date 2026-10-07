@@ -295,7 +295,7 @@ class VisualDeepfakeDetector(VisualDetector):
             origin_y=by,
             width=bw,
             height=bh,
-            margin_ratio=0.15
+            margin_ratio=0.12
         )
         if crop is None or crop.size == 0:
             return None
@@ -323,7 +323,7 @@ class VisualDeepfakeDetector(VisualDetector):
         origin_y: int,
         width: int,
         height: int,
-        margin_ratio: float = 0.15
+        margin_ratio: float = 0.12
     ) -> Optional[np.ndarray]:
         """
         Extracts a square bounding box centered on the given coordinates with margin and reflection padding.
@@ -450,23 +450,23 @@ class VisualDeepfakeDetector(VisualDetector):
         Runs model inference on a single RGB face crop.
         Returns: (real_score, fake_score) where real_score + fake_score == 1.0.
         """
-        if self.model is None:
-            raise RuntimeError("Classifier model is not initialized. Call load() first.")
+        res = self.predict_batch([face_crop_rgb])
+        if res:
+            return res[0]
+        return 0.5, 0.5
 
-        tensor = self.transform(face_crop_rgb).unsqueeze(0).to(self.device)
-
-        with torch.no_grad():
-            logits = self.model(tensor)
-            probs = torch.softmax(logits, dim=-1)[0]
-            raw_real = round(float(probs[0].item()), 4)
-            raw_fake = round(float(probs[1].item()), 4)
-
-        return raw_real, raw_fake
-
-    def predict_batch(self, face_crops_rgb: List[np.ndarray]) -> List[Tuple[float, float]]:
+    def predict_batch_detailed(
+        self,
+        face_crops_rgb: List[np.ndarray],
+        telemetry: Optional[List[List[float]]] = None
+    ) -> List[Tuple[float, float, float, float, float]]:
         """
-        Runs batched model inference on a list of RGB face crops.
-        Returns: List of (real_score, fake_score) where real_score + fake_score == 1.0.
+        Runs batched model inference returning:
+          (real_s, fake_s, raw_real, raw_fake, adapted_fake)
+        where:
+          - (raw_real, raw_fake): Outputs directly from frozen EfficientNet base model
+          - adapted_fake: Output from Authentica adaptation network
+          - (real_s, fake_s): Final calibrated/adapted scores according to active model version
         """
         if not face_crops_rgb:
             return []
@@ -478,14 +478,49 @@ class VisualDeepfakeDetector(VisualDetector):
         batch_tensor = torch.stack(tensors).to(self.device)
 
         with torch.no_grad():
-            logits = self.model(batch_tensor)
-            probs = torch.softmax(logits, dim=-1)
-            results = [
-                (round(float(p[0].item()), 4), round(float(p[1].item()), 4))
-                for p in probs
-            ]
+            feats = self.model.features(batch_tensor)
+            pooled = self.model.avgpool(feats)
+            embs = torch.flatten(pooled, 1)  # [batch, 1280]
+            raw_logits = self.model.classifier(embs)
+            raw_probs = torch.softmax(raw_logits, dim=-1)
+
+        self.last_features = embs.cpu().numpy().tolist()
+        self.last_telemetry = telemetry if telemetry else [[0.0, 0.0, 0.0, 0.0] for _ in face_crops_rgb]
+
+        from app.services.active_learning.training_service import ActiveLearningTrainingService
+        training_service = ActiveLearningTrainingService.get_instance()
+
+        telem_tensor = torch.tensor(self.last_telemetry, dtype=torch.float32, device=self.device)
+        with torch.no_grad():
+            adapted_logits = training_service.adapter(embs, telem_tensor)
+            adapted_probs = torch.softmax(adapted_logits, dim=-1)
+
+        results = []
+        is_adapted = training_service.active_version != "visual-v0"
+
+        for i in range(len(face_crops_rgb)):
+            raw_real = round(float(raw_probs[i, 0].item()), 4)
+            raw_fake = round(float(raw_probs[i, 1].item()), 4)
+            adapted_fake = round(float(adapted_probs[i, 1].item()), 4)
+
+            if is_adapted:
+                fake_s = adapted_fake
+                real_s = round(1.0 - fake_s, 4)
+            else:
+                fake_s = raw_fake
+                real_s = raw_real
+
+            results.append((real_s, fake_s, raw_real, raw_fake, adapted_fake))
 
         return results
+
+    def predict_batch(self, face_crops_rgb: List[np.ndarray]) -> List[Tuple[float, float]]:
+        """
+        Runs batched model inference on a list of RGB face crops.
+        Returns: List of (real_score, fake_score) where real_score + fake_score == 1.0.
+        """
+        detailed = self.predict_batch_detailed(face_crops_rgb)
+        return [(d[0], d[1]) for d in detailed]
 
     async def analyze(
         self,
@@ -497,15 +532,20 @@ class VisualDeepfakeDetector(VisualDetector):
         """
         start_time = time.perf_counter()
 
+        from app.services.active_learning.training_service import ActiveLearningTrainingService
+        training_service = ActiveLearningTrainingService.get_instance()
+
         if not frames:
             logger.info("VisualDeepfakeDetector: No frames provided for analysis.")
             return VisualResult(
                 available=True,
                 model=MODEL_NAME,
+                adapter_version=training_service.active_version,
                 status="completed",
                 frames_analyzed=0,
                 faces_found=0,
                 face_detection_rate=0.0,
+                average_face_occupancy_pct=None,
                 results=[]
             )
 
@@ -517,16 +557,19 @@ class VisualDeepfakeDetector(VisualDetector):
             return VisualResult(
                 available=False,
                 model=MODEL_NAME,
+                adapter_version=training_service.active_version,
                 status="error",
                 frames_analyzed=0,
                 faces_found=0,
                 face_detection_rate=None,
+                average_face_occupancy_pct=None,
                 results=[]
             )
 
         # Process each frame: extract face and prepare for inference
         frame_results: List[VisualFrameResult] = []
         valid_face_crops: List[np.ndarray] = []
+        valid_telemetries: List[List[float]] = []
         face_crop_indices: List[int] = []  # Maps crop index to frame_results index
         prev_box: Optional[Tuple[int, int, int, int]] = None
 
@@ -574,6 +617,12 @@ class VisualDeepfakeDetector(VisualDetector):
                 else:
                     face_crop, face_conf, bbox, pixel_size, blur_val, luma_val, noise_val = res
                     prev_box = (bbox[0], bbox[1], bbox[2], bbox[3])
+
+                    # Person-centric crop occupancy metrics
+                    side_est = max(bbox[2], bbox[3]) * 1.12
+                    occupancy_pct = round((bbox[2] * bbox[3]) / max(1.0, (side_est * side_est)) * 100.0, 2)
+                    margin_pct = 12.0
+
                     # Face detected - stage for inference with capture-quality telemetry
                     frame_results.append(VisualFrameResult(
                         timestamp_s=ts,
@@ -586,8 +635,16 @@ class VisualDeepfakeDetector(VisualDetector):
                         blur_score=blur_val,
                         luma=luma_val,
                         noise_estimate=noise_val,
+                        face_occupancy_pct=occupancy_pct,
+                        context_margin_pct=margin_pct,
                     ))
                     valid_face_crops.append(face_crop)
+                    valid_telemetries.append([
+                        blur_val / 500.0,
+                        luma_val / 255.0,
+                        noise_val / 10.0,
+                        0.0
+                    ])
                     face_crop_indices.append(len(frame_results) - 1)
 
             except Exception as e:
@@ -600,14 +657,17 @@ class VisualDeepfakeDetector(VisualDetector):
                     fake_score=None
                 ))
 
-        # Run batched inference on all extracted face crops
+        # Run batched inference with detailed adapter integration
         if valid_face_crops:
             try:
-                scores = self.predict_batch(valid_face_crops)
-                for crop_idx, (real_s, fake_s) in enumerate(scores):
+                detailed_scores = self.predict_batch_detailed(valid_face_crops, valid_telemetries)
+                for crop_idx, (real_s, fake_s, raw_real, raw_fake, adapted_fake) in enumerate(detailed_scores):
                     target_idx = face_crop_indices[crop_idx]
                     frame_results[target_idx].real_score = real_s
                     frame_results[target_idx].fake_score = fake_s
+                    frame_results[target_idx].raw_real_score = raw_real
+                    frame_results[target_idx].raw_fake_score = raw_fake
+                    frame_results[target_idx].adapted_fake_score = adapted_fake
             except Exception as e:
                 logger.error(f"Inference batch failed: {e}. Falling back to sequential inference.")
                 for crop_idx, crop in enumerate(valid_face_crops):
@@ -616,6 +676,9 @@ class VisualDeepfakeDetector(VisualDetector):
                         real_s, fake_s = self.predict_face_crop(crop)
                         frame_results[target_idx].real_score = real_s
                         frame_results[target_idx].fake_score = fake_s
+                        frame_results[target_idx].raw_real_score = real_s
+                        frame_results[target_idx].raw_fake_score = fake_s
+                        frame_results[target_idx].adapted_fake_score = fake_s
                     except Exception as frame_err:
                         logger.warning(f"Inference failed on individual crop {crop_idx}: {frame_err}")
                         frame_results[target_idx].face_detected = False
@@ -626,20 +689,28 @@ class VisualDeepfakeDetector(VisualDetector):
         frames_analyzed = len(frame_results)
         faces_found = sum(1 for r in frame_results if r.face_detected is True)
         face_detection_rate = round(faces_found / frames_analyzed, 4) if frames_analyzed > 0 else 0.0
+
+        occupancies = [r.face_occupancy_pct for r in frame_results if r.face_occupancy_pct is not None]
+        avg_occupancy = round(float(np.mean(occupancies)), 2) if occupancies else None
+
         elapsed = time.perf_counter() - start_time
 
         logger.info(
             f"VisualDeepfakeDetector: Analyzed {frames_analyzed} frames | "
             f"Faces found: {faces_found} ({face_detection_rate * 100:.1f}%) | "
+            f"Average face occupancy: {avg_occupancy}% | "
+            f"Adapter: {training_service.active_version} | "
             f"Elapsed: {elapsed:.2f}s"
         )
 
         return VisualResult(
             available=True,
             model=MODEL_NAME,
+            adapter_version=training_service.active_version,
             status="completed",
             frames_analyzed=frames_analyzed,
             faces_found=faces_found,
             face_detection_rate=face_detection_rate,
+            average_face_occupancy_pct=avg_occupancy,
             results=frame_results
         )

@@ -553,6 +553,8 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
                     start_s=0.0,
                     end_s=round(duration_s, 2),
                     spoof_score=score,
+                    raw_spoof_score=score,
+                    adapted_spoof_score=score,
                     status=status,
                     rms_db=round(rms_db, 1)
                 ))
@@ -562,6 +564,8 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
                     start_s=0.0,
                     end_s=round(duration_s, 2),
                     spoof_score=None,
+                    raw_spoof_score=None,
+                    adapted_spoof_score=None,
                     status="error",
                     rms_db=None
                 ))
@@ -581,6 +585,8 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
                         start_s=start_s,
                         end_s=end_s,
                         spoof_score=score,
+                        raw_spoof_score=score,
+                        adapted_spoof_score=score,
                         status=status,
                         rms_db=round(rms_db, 1)
                     ))
@@ -590,6 +596,8 @@ class LocalAudioAntiSpoofDetector(AudioDetector):
                         start_s=start_s,
                         end_s=end_s,
                         spoof_score=None,
+                        raw_spoof_score=None,
+                        adapted_spoof_score=None,
                         status="error",
                         rms_db=None
                     ))

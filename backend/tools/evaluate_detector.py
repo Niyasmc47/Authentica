@@ -226,6 +226,15 @@ BENCHMARK_CASES = [
         "audio_windows": [(0.0, 4.0, 0.02), (4.0, 8.0, 0.03)],
         "speech": "Invest ten thousand rupees into our proprietary crypto trading bot today for guaranteed five hundred percent weekly returns.",
     },
+    {
+        "name": "authentic_real_person_ransom_threat",
+        "gt_media": "AUTHENTIC",
+        "gt_fraud": "HIGH",
+        "duration_s": 8.0,
+        "visual_frames": [(i, 0.98, 0.02) for i in range(8)],
+        "audio_windows": [(0.0, 4.0, 0.03), (4.0, 8.0, 0.02)],
+        "speech": "Your boy is in my hand, Mr. Give me 10 crore rupees and I will think about releasing him. Don't even tell the police, I will kill him if I want to.",
+    },
 
     # Group F: Single-Frame Spikes / Compression Artifacts / Sensor Noise (Spike Attenuation)
     {

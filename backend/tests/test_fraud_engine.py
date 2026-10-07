@@ -388,3 +388,218 @@ def test_17_indirect_card_not_working_transfer(fraud_engine):
     res = fraud_engine.analyze(speech)
     assert any(act.action == "TRANSFER_MONEY" for act in res.requested_actions)
 
+
+def test_18_direct_threat_if_you_dont_pay_i_will_hurt_him(fraud_engine):
+    """Direct threat: 'If you don't pay, I will hurt him.' -> HIGH."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="If you don't pay, I will hurt him.",
+        segments=[SpeechSegment(start_s=0.0, end_s=4.0, text="If you don't pay, I will hurt him.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "HIGH"
+    assert any(cat.category == "THREAT_PRESSURE" for cat in res.categories)
+    assert not res.news_context_downgrade
+
+
+def test_19_ransom_send_lakh_or_never_see_him_again(fraud_engine):
+    """Ransom: 'Send ₹5 lakh or you will never see him again.' -> HIGH."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="Send ₹5 lakh or you will never see him again.",
+        segments=[SpeechSegment(start_s=0.0, end_s=4.0, text="Send ₹5 lakh or you will never see him again.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "HIGH"
+    assert any(act.action == "SEND_MONEY" for act in res.requested_actions)
+    assert any(cat.category == "THREAT_PRESSURE" for cat in res.categories)
+    assert not res.news_context_downgrade
+
+
+def test_20_secrecy_dont_tell_the_police(fraud_engine):
+    """Secrecy: 'Don't tell the police.' -> detects SECRECY and KEEP_SECRET."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=3.0,
+        text="Don't tell the police.",
+        segments=[SpeechSegment(start_s=0.0, end_s=3.0, text="Don't tell the police.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert any(cat.category == "SECRECY" for cat in res.categories)
+    assert any(act.action == "KEEP_SECRET" for act in res.requested_actions)
+
+
+def test_21_combined_send_money_dont_tell_anyone_or_he_gets_hurt(fraud_engine):
+    """Combined: 'Send the money now. Don't tell anyone or he gets hurt.' -> HIGH."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="Send the money now. Don't tell anyone or he gets hurt.",
+        segments=[SpeechSegment(start_s=0.0, end_s=4.0, text="Send the money now. Don't tell anyone or he gets hurt.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "HIGH"
+    assert any(act.action == "SEND_MONEY" for act in res.requested_actions)
+    assert any(cat.category == "SECRECY" for cat in res.categories)
+    assert any(cat.category == "THREAT_PRESSURE" for cat in res.categories)
+    assert not res.news_context_downgrade
+
+
+def test_22_news_police_warned_criminals_ask_for_money(fraud_engine):
+    """News: 'Police warned that criminals ask victims for money.' -> appropriately downgraded."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="Police warned that criminals ask victims for money.",
+        segments=[SpeechSegment(start_s=0.0, end_s=4.0, text="Police warned that criminals ask victims for money.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.news_context_downgrade is True or res.level == "LOW"
+
+
+def test_23_educational_never_send_money_to_someone_threatening(fraud_engine):
+    """Educational: 'Never send money to someone threatening you.' -> LOW."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="Never send money to someone threatening you.",
+        segments=[SpeechSegment(start_s=0.0, end_s=4.0, text="Never send money to someone threatening you.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "LOW"
+    assert not any(act.action == "SEND_MONEY" for act in res.requested_actions)
+
+
+def test_24_joke_ill_kill_you_laughing(fraud_engine):
+    """Joke: 'I'll kill you 😂' in casual laughing banter -> LOW."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=3.0,
+        text="I'll kill you 😂",
+        segments=[SpeechSegment(start_s=0.0, end_s=3.0, text="I'll kill you 😂")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "LOW"
+
+
+def test_25_legitimate_ill_report_this_to_police_if_dont_return_money(fraud_engine):
+    """Legitimate dispute: 'I'll report this to the police if you don't return my money.' -> LOW."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="I'll report this to the police if you don't return my money.",
+        segments=[SpeechSegment(start_s=0.0, end_s=4.0, text="I'll report this to the police if you don't return my money.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "LOW"
+
+
+def test_26_indirect_if_you_care_about_him_arrange_money(fraud_engine):
+    """Indirect extortion: 'If you care about him, you'll arrange the money.' -> HIGH."""
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=4.0,
+        text="If you care about him, you'll arrange the money.",
+        segments=[SpeechSegment(start_s=0.0, end_s=4.0, text="If you care about him, you'll arrange the money.")],
+    )
+    res = fraud_engine.analyze(speech)
+    assert res.level == "HIGH"
+    assert any(act.action == "SEND_MONEY" for act in res.requested_actions)
+    assert any(cat.category == "THREAT_PRESSURE" for cat in res.categories)
+
+
+def test_27_known_real_person_high_threat_case(fraud_engine):
+    """
+    P9 Regression Test: Known Real-Person High-Threat Case
+    "Your boy is in my hand, Mr."
+    "Give me 10 crore rupees and I will think about releasing him"
+    "Don't even tell the police, I will kill him if I want to"
+
+    Expected:
+      fraud = HIGH
+      requested_actions includes SEND_MONEY
+      categories includes THREAT_PRESSURE
+      categories includes SECRECY
+      news_context_downgrade = False
+      action = STOP_AND_VERIFY
+    """
+    from app.schemas.evidence import EvidenceMatrix, EvidenceModalityResult, ProvenanceResult
+    from app.schemas.reliability import ReliabilityResult
+    from app.services.assessment_service import AssessmentService
+
+    segments = [
+        SpeechSegment(start_s=0.0, end_s=2.5, text="Your boy is in my hand, Mr."),
+        SpeechSegment(start_s=2.5, end_s=5.5, text="Give me 10 crore rupees and I will think about releasing him"),
+        SpeechSegment(start_s=5.5, end_s=8.0, text="Don't even tell the police, I will kill him if I want to"),
+    ]
+    speech = SpeechResult(
+        available=True,
+        model="faster-whisper-base-int8",
+        status="completed",
+        language="en",
+        duration_s=8.0,
+        text=(
+            "Your boy is in my hand, Mr. "
+            "Give me 10 crore rupees and I will think about releasing him. "
+            "Don't even tell the police, I will kill him if I want to."
+        ),
+        segments=segments,
+    )
+
+    fraud_res = fraud_engine.analyze(speech)
+
+    # 1. Fraud Risk Assertions
+    assert fraud_res.level == "HIGH", f"Expected HIGH, got {fraud_res.level}"
+    assert any(act.action == "SEND_MONEY" for act in fraud_res.requested_actions), "Expected SEND_MONEY action"
+    assert any(cat.category == "THREAT_PRESSURE" for cat in fraud_res.categories), "Expected THREAT_PRESSURE category"
+    assert any(cat.category == "SECRECY" for cat in fraud_res.categories), "Expected SECRECY category"
+    assert fraud_res.news_context_downgrade is False, "News downgrade must NOT fire on direct extortion threats"
+
+    from app.schemas.evidence import EvidenceMatrix, EvidenceMetadata, EvidenceModalityResult, ProvenanceResult
+    from app.schemas.reliability import ReliabilityResult
+    from app.services.assessment_service import AssessmentService
+
+    assessment_svc = AssessmentService()
+    for media_verdict in ["LIKELY_MANIPULATED", "UNCERTAIN", "NO_STRONG_EVIDENCE", "SUSPICIOUS"]:
+        matrix = EvidenceMatrix(
+            visual=EvidenceModalityResult(level="HIGH"),
+            audio=EvidenceModalityResult(level="HIGH"),
+            provenance=ProvenanceResult(state="NONE_FOUND", note="No credentials found."),
+            metadata=EvidenceMetadata(media_type="VIDEO", duration_s=8.0),
+            reliability=ReliabilityResult(level="OK", reasons=[]),
+        )
+        assessment, explanations, _ = assessment_svc.assess(matrix, timeline=[], fraud=fraud_res)
+        assert assessment.fraud == "HIGH"
+        assert assessment.action == "STOP_AND_VERIFY", (
+            f"Expected STOP_AND_VERIFY when fraud=HIGH, but got {assessment.action} for media={media_verdict}"
+        )
+

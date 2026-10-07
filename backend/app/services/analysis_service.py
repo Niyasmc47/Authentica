@@ -40,6 +40,9 @@ from app.services.video_processor import (
     VideoProcessingError,
     VideoProcessor,
 )
+import json
+import numpy as np
+from app.services.active_learning.verified_memory import VerifiedMediaRegistry
 from app.utils.hashing import compute_sha256
 from app.utils.temp_manager import TempWorkspace
 
@@ -207,6 +210,12 @@ class AnalysisService:
                     media_type="AUDIO"
                 )
 
+                # Attach Verified Media Memory (SHA-256)
+                registry = VerifiedMediaRegistry.get_instance()
+                exact_match = registry.lookup_exact_sha256(sha256_hash)
+                evidence_matrix.metadata.exact_verified_match = bool(exact_match)
+                evidence_matrix.metadata.verified_ground_truth = exact_match
+
                 # Timeline Aggregation
                 timeline_events = self.timeline_service.aggregate(
                     visual=visual_result,
@@ -290,6 +299,32 @@ class AnalysisService:
                     reliability=reliability_result,
                     media_type="VIDEO"
                 )
+
+                # Attach Verified Media Memory (SHA-256) and Near-Duplicate detection
+                registry = VerifiedMediaRegistry.get_instance()
+                exact_match = registry.lookup_exact_sha256(sha256_hash)
+                last_features = getattr(self.visual_detector, "last_features", None)
+                near_dup = None
+                if last_features:
+                    mean_feat = np.mean(np.array(last_features, dtype=np.float32), axis=0).tolist()
+                    near_dup = registry.lookup_near_duplicate(mean_feat, similarity_threshold=0.96)
+                    # Cache features for active learning feedback
+                    feature_cache_path = Path(f"backend/temp/analyses/{analysis_id}_features.json")
+                    feature_cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    last_telem = getattr(self.visual_detector, "last_telemetry", None)
+                    cache_payload = {
+                        "analysis_id": analysis_id,
+                        "filename": original_filename,
+                        "sha256": sha256_hash,
+                        "features": last_features,
+                        "telemetry": last_telem,
+                        "mean_embedding": mean_feat
+                    }
+                    feature_cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
+
+                evidence_matrix.metadata.exact_verified_match = bool(exact_match)
+                evidence_matrix.metadata.verified_ground_truth = exact_match
+                evidence_matrix.metadata.near_duplicate_match = near_dup
 
                 # Stage 2 & 3: Timeline Aggregation
                 timeline_events = self.timeline_service.aggregate(

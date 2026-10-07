@@ -55,21 +55,31 @@ export const ResultsPage: React.FC = () => {
   const [fbNotes, setFbNotes] = useState<string>('');
   const [fbSubmitting, setFbSubmitting] = useState<boolean>(false);
   const [fbSuccess, setFbSuccess] = useState<string | null>(null);
+  const [fbTrainingData, setFbTrainingData] = useState<any>(null);
+  const [fbError, setFbError] = useState<string | null>(null);
 
   const handleSendFeedback = async () => {
     if (!analysis || !fbMedia || !fbFraud) return;
     try {
       setFbSubmitting(true);
-      const res = await submitAnalysisFeedback(analysis.id, {
+      setFbError(null);
+      const res: any = await submitAnalysisFeedback(analysis.id, {
         ground_truth_media: fbMedia,
         ground_truth_fraud: fbFraud,
         is_false_positive: fbMedia === 'REAL' && (analysis.assessment?.media === 'LIKELY_MANIPULATED' || analysis.assessment?.media === 'SUSPICIOUS'),
         is_false_negative: fbMedia === 'FAKE' && analysis.assessment?.media === 'NO_STRONG_EVIDENCE',
         notes: fbNotes,
       });
-      setFbSuccess(res.message || 'Ground-truth feedback recorded and staged for model retraining!');
+      if (res.ok) {
+        setFbSuccess(res.message || 'Ground-truth feedback recorded and model adapter trained!');
+        if (res.training) {
+          setFbTrainingData(res.training);
+        }
+      } else {
+        setFbError(res.message || 'Verification stored, but model adaptation FAILED.');
+      }
     } catch (err: any) {
-      alert(err.message || 'Failed to submit feedback');
+      setFbError(err.message || 'Failed to submit verification feedback');
     } finally {
       setFbSubmitting(false);
     }
@@ -847,15 +857,46 @@ export const ResultsPage: React.FC = () => {
           </span>
         </div>
 
-        {fbSuccess ? (
-          <div className="p-4 rounded-xl bg-mint/40 border border-mint text-carbon font-mono text-xs flex items-center space-x-3">
-            <Check className="w-5 h-5 text-carbon shrink-0" />
-            <span>{fbSuccess}</span>
+        {fbSuccess && (
+          <div className="p-5 rounded-xl bg-mint/40 border border-mint text-carbon font-mono text-xs space-y-3">
+            <div className="flex items-center space-x-2.5 font-bold text-sm">
+              <Check className="w-5 h-5 text-carbon shrink-0" />
+              <span>{fbSuccess}</span>
+            </div>
+            {fbTrainingData && (
+              <div className="pt-3 border-t border-carbon/15 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px]">
+                <div className="p-2 rounded bg-paper/60 border border-carbon/10">
+                  <span className="text-slate block text-[10px] uppercase font-bold">Adapter Version</span>
+                  <span className="font-bold text-carbon text-xs">{fbTrainingData.active_version}</span>
+                </div>
+                <div className="p-2 rounded bg-paper/60 border border-carbon/10">
+                  <span className="text-slate block text-[10px] uppercase font-bold">Samples Trained</span>
+                  <span className="font-bold text-carbon text-xs">{fbTrainingData.samples_used}</span>
+                </div>
+                <div className="p-2 rounded bg-paper/60 border border-carbon/10">
+                  <span className="text-slate block text-[10px] uppercase font-bold">Loss Delta</span>
+                  <span className="font-bold text-carbon text-xs">{fbTrainingData.initial_loss} → {fbTrainingData.final_loss}</span>
+                </div>
+                <div className="p-2 rounded bg-paper/60 border border-carbon/10">
+                  <span className="text-slate block text-[10px] uppercase font-bold">Trainable Weights</span>
+                  <span className="font-bold text-carbon text-xs">{fbTrainingData.trainable_parameters?.toLocaleString()}</span>
+                </div>
+              </div>
+            )}
           </div>
-        ) : (
+        )}
+
+        {fbError && (
+          <div className="p-4 rounded-xl bg-crimson/10 border border-crimson text-crimson font-mono text-xs flex items-center space-x-3">
+            <AlertTriangle className="w-5 h-5 text-crimson shrink-0" />
+            <span>{fbError}</span>
+          </div>
+        )}
+
+        {!fbSuccess && (
           <div className="space-y-5">
             <p className="text-xs font-mono text-slate leading-relaxed">
-              Confirm whether this detection was accurate or a false positive/negative. Your verified confirmation is stored in the MongoDB training dataset to fine-tune the models and expand fraud detection lexicons.
+              Confirm whether this detection was accurate or a false positive/negative. Your verified confirmation updates the persistent training dataset, triggers actual gradient-descent optimization on the model adapter, and versions the checkpoint.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -947,7 +988,7 @@ export const ResultsPage: React.FC = () => {
                 className="editorial-btn-primary flex items-center space-x-2 font-mono text-xs uppercase disabled:opacity-40"
               >
                 <Database className="w-4 h-4" />
-                <span>{fbSubmitting ? 'Staging Dataset...' : 'Submit Ground-Truth to Model Buffer'}</span>
+                <span>{fbSubmitting ? 'Extracting features & optimizing adapter...' : 'Submit Ground-Truth & Train Adapter'}</span>
               </button>
             </div>
           </div>

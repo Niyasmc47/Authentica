@@ -51,7 +51,18 @@ class AssessmentService:
         audio_level = matrix.audio.level
 
         # 1. Determine Media Manipulation Verdict strictly based on Stage 2 rules
-        if rel_level == "LOW":
+        exact_verified = getattr(matrix.metadata, "exact_verified_match", False)
+        verified_record = getattr(matrix.metadata, "verified_ground_truth", None)
+
+        if exact_verified and verified_record:
+            gt_m = verified_record.get("ground_truth_media")
+            if gt_m == "REAL":
+                media_verdict = "NO_STRONG_EVIDENCE"
+            elif gt_m == "FAKE":
+                media_verdict = "LIKELY_MANIPULATED"
+            else:
+                media_verdict = "UNCERTAIN"
+        elif rel_level == "LOW":
             # Genuine media quality degradation, corruption, or execution failure
             media_verdict = "UNCERTAIN"
         elif visual_level == "HIGH" and audio_level == "HIGH":
@@ -118,6 +129,20 @@ class AssessmentService:
         action: str,
     ) -> List[str]:
         reasons: List[str] = []
+
+        # 0. Verified Media Memory Context
+        if getattr(matrix.metadata, "exact_verified_match", False) and getattr(matrix.metadata, "verified_ground_truth", None):
+            gt = matrix.metadata.verified_ground_truth
+            reasons.append(
+                f"Exact Verified Media: File binary matches a certified {gt.get('ground_truth_media')} record in the Authentica ground-truth registry."
+            )
+
+        if getattr(matrix.metadata, "near_duplicate_match", None):
+            nd = matrix.metadata.near_duplicate_match
+            reasons.append(
+                f"Near-Duplicate Supporting Signal: Perceptual similarity ({nd['similarity'] * 100:.1f}%) "
+                f"matches previously analyzed '{nd.get('filename')}' ({nd.get('ground_truth_media')})."
+            )
 
         # 1. Reliability Context
         if matrix.reliability.level == "LOW":
