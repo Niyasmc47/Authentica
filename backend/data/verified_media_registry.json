@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "count": 2,
+  "count": 3,
   "entries": {
     "33cab4d8a97f5226e5aa623684380ccb39f7795ad61040e653b7e1765906c118": {
       "sha256": "33cab4d8a97f5226e5aa623684380ccb39f7795ad61040e653b7e1765906c118",
@@ -2579,6 +2579,15 @@
         18.452964782714844,
         12.41869068145752
       ],
+      "notes": "",
+      "analyst_id": "analyst"
+    },
+    "test_sha_repeat_verification_12345": {
+      "sha256": "test_sha_repeat_verification_12345",
+      "filename": "threat_test.mp4",
+      "ground_truth_media": "REAL",
+      "ground_truth_fraud": "SCAM",
+      "embedding": null,
       "notes": "",
       "analyst_id": "analyst"
     }

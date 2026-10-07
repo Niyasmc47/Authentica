@@ -183,6 +183,8 @@ async def record_feedback(
                 notes=feedback.notes or "",
                 analyst_id=feedback.analyst_id or "analyst"
             )
+            from app.services.cache_service import AnalysisCacheService
+            AnalysisCacheService.get_instance().invalidate(sample["sha256"])
 
         # 2. Run active learning adaptation via ActiveLearningTrainingService
         from app.services.active_learning.training_service import ActiveLearningTrainingService

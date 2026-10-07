@@ -4,8 +4,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from app.schemas.analysis import AnalysisResponse, InputInfo, VisualResult, AudioResult, SpeechResult, SpeechSegment
-from app.schemas.evidence import EvidenceMatrix, EvidenceMetadata, ProvenanceResult, MediaAssessment
+from app.schemas.analysis import AnalysisResponse, InputInfo, VisualResult, AudioResult, SpeechResult, SpeechSegment, VideoInfo
+from app.schemas.evidence import EvidenceMatrix, EvidenceMetadata, ProvenanceResult, MediaAssessment, EvidenceModalityResult
 from app.schemas.fraud import FraudResult, FraudCategoryEvidence
 from app.schemas.reliability import ReliabilityResult
 from app.services.cache_service import AnalysisCacheService
@@ -173,4 +173,89 @@ def test_speech_result_transcript_attribute_safety():
     assert hasattr(res, "transcript")
     # transcript field is present
     assert res.transcript is None or isinstance(res.transcript, str)
+
+
+@pytest.mark.anyio
+async def test_verified_ground_truth_reanalysis_persistence(tmp_path):
+    """
+    REGRESSION TEST:
+    When an analyst marks an analysis as REAL (even if high fraud risk):
+    1. The stored analysis updates in-place to NO_STRONG_EVIDENCE and STOP_AND_VERIFY.
+    2. VerifiedMediaRegistry remembers it.
+    3. Next time the same video is evaluated, it outputs NO_STRONG_EVIDENCE and STOP_AND_VERIFY.
+    """
+    from app.services.active_learning.verified_memory import VerifiedMediaRegistry
+    from app.db import DatabaseService, FeedbackPayload
+    
+    sha = "test_sha_repeat_verification_12345"
+    analysis_id = "test-analysis-repeat-1"
+    
+    # 1. Create initial analysis with high fraud and suspicious media
+    analysis = AnalysisResponse(
+        id=analysis_id,
+        status="completed",
+        created_at="2026-10-07T10:00:00Z",
+        video=VideoInfo(
+            filename="threat_test.mp4",
+            sha256=sha,
+            duration_s=10.0,
+            fps=30.0,
+            width=1280,
+            height=720,
+            frames_sampled=10,
+            audio_available=True
+        ),
+        assessment=MediaAssessment(
+            media="LIKELY_MANIPULATED",
+            fraud="HIGH",
+            action="STOP_AND_VERIFY"
+        ),
+        evidence=EvidenceMatrix(
+            visual=EvidenceModalityResult(level="LOW"),
+            audio=EvidenceModalityResult(level="LOW"),
+            provenance=ProvenanceResult(state="NONE_FOUND", note="No C2PA manifest found."),
+            metadata=EvidenceMetadata(
+                media_type="VIDEO",
+                duration_s=10.0,
+                exact_verified_match=False,
+                verified_ground_truth=None
+            ),
+            reliability=ReliabilityResult(level="OK")
+        ),
+        explanation=["Initial detection run"]
+    )
+    
+    await DatabaseService.save_analysis(analysis)
+    
+    # 2. Analyst marks it from History / Report as CONFIRMED REAL with HIGH FRAUD
+    feedback = FeedbackPayload(
+        ground_truth_media="REAL",
+        ground_truth_fraud="SCAM",
+        notes="Known genuine threat video",
+        analyst_id="lead_analyst"
+    )
+    
+    await DatabaseService.record_feedback(analysis_id, feedback)
+    
+    # 3. Reload stored analysis from DB/disk: must be updated to NO_STRONG_EVIDENCE and STOP_AND_VERIFY
+    updated_analysis = await DatabaseService.get_analysis(analysis_id)
+    assert updated_analysis is not None
+    assert updated_analysis.assessment.media == "NO_STRONG_EVIDENCE"
+    assert updated_analysis.assessment.fraud == "HIGH"
+    assert updated_analysis.assessment.action == "STOP_AND_VERIFY"
+    assert updated_analysis.evidence.metadata.exact_verified_match is True
+    
+    # 4. In VerifiedMediaRegistry, exact lookup must return REAL
+    registry = VerifiedMediaRegistry.get_instance()
+    registry.register(
+        sha256=sha,
+        filename="threat_test.mp4",
+        ground_truth_media="REAL",
+        ground_truth_fraud="SCAM"
+    )
+    matched = registry.lookup_exact_sha256(sha)
+    assert matched is not None
+    assert matched["ground_truth_media"] == "REAL"
+    assert matched["ground_truth_fraud"] == "SCAM"
+
 

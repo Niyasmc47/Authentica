@@ -248,6 +248,54 @@ class DatabaseService:
             }
         }
 
+        # Update the stored analysis record in-place with the verified ground truth
+        if analysis.assessment:
+            if feedback.ground_truth_media == "REAL":
+                analysis.assessment.media = "NO_STRONG_EVIDENCE"
+            elif feedback.ground_truth_media == "FAKE":
+                analysis.assessment.media = "LIKELY_MANIPULATED"
+
+            fraud_risk = analysis.assessment.fraud or "LOW"
+            if feedback.ground_truth_fraud == "SCAM":
+                analysis.assessment.fraud = "HIGH"
+                fraud_risk = "HIGH"
+            elif feedback.ground_truth_fraud == "HARMLESS" and fraud_risk != "HIGH":
+                analysis.assessment.fraud = "LOW"
+                fraud_risk = "LOW"
+
+            if fraud_risk == "HIGH":
+                analysis.assessment.action = "STOP_AND_VERIFY"
+            elif analysis.assessment.media == "NO_STRONG_EVIDENCE" and fraud_risk in ("LOW", "NOT_ASSESSABLE"):
+                analysis.assessment.action = "NO_ACTION_FLAGGED"
+            else:
+                analysis.assessment.action = "VERIFY"
+
+        if analysis.evidence and analysis.evidence.metadata:
+            analysis.evidence.metadata.exact_verified_match = True
+            analysis.evidence.metadata.verified_ground_truth = {
+                "ground_truth_media": feedback.ground_truth_media,
+                "ground_truth_fraud": feedback.ground_truth_fraud,
+                "verified_at": timestamp,
+                "notes": feedback.notes or "",
+            }
+
+        if analysis.explanation is not None:
+            v_note = f"Verified Ground Truth: Human analyst certified media as {feedback.ground_truth_media}."
+            if v_note not in analysis.explanation:
+                analysis.explanation.insert(0, v_note)
+
+        # Persist updated analysis back to MongoDB Atlas and local disk
+        try:
+            await cls.save_analysis(analysis)
+            logger.info(
+                f"DatabaseService: Updated analysis '{analysis_id}' with verified verdict: "
+                f"media={analysis.assessment.media if analysis.assessment else 'N/A'}, "
+                f"fraud={analysis.assessment.fraud if analysis.assessment else 'N/A'}, "
+                f"action={analysis.assessment.action if analysis.assessment else 'N/A'}"
+            )
+        except Exception as e:
+            logger.warning(f"DatabaseService: Failed to update analysis record: {e}")
+
         # 1. Save to local feedback archive
         try:
             fb_file = cls._get_feedback_dir() / f"feedback_{analysis_id}.json"

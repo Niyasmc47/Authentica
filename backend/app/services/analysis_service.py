@@ -145,6 +145,10 @@ class AnalysisService:
             sha256_hash = compute_sha256(saved_media_path)
             logger.info(f"[{analysis_id}] Computed SHA-256: {sha256_hash}")
 
+            # Check Verified Media Memory (SHA-256)
+            registry = VerifiedMediaRegistry.get_instance()
+            exact_verified_record = registry.lookup_exact_sha256(sha256_hash)
+
             # Check Fast Re-Analysis Cache (Level 1 exact match under active adapter)
             active_adapter = getattr(self.visual_detector, "adapter_version", "visual-v0")
             cache_service = AnalysisCacheService.get_instance()
@@ -155,6 +159,27 @@ class AnalysisService:
                 cached_resp_dict["created_at"] = created_at
                 cached_resp_dict["cached"] = True
                 cached_resp_dict["reanalysis_speedup_ms"] = round(12.5, 2)
+
+                # If this video was verified in human ground-truth registry, ensure verdict matches verified truth!
+                if exact_verified_record:
+                    gt_m = exact_verified_record.get("ground_truth_media")
+                    if gt_m == "REAL":
+                        cached_resp_dict["assessment"]["media"] = "NO_STRONG_EVIDENCE"
+                    elif gt_m == "FAKE":
+                        cached_resp_dict["assessment"]["media"] = "LIKELY_MANIPULATED"
+
+                    fraud_risk = cached_resp_dict.get("assessment", {}).get("fraud", "LOW")
+                    if fraud_risk == "HIGH":
+                        cached_resp_dict["assessment"]["action"] = "STOP_AND_VERIFY"
+                    elif cached_resp_dict["assessment"]["media"] == "NO_STRONG_EVIDENCE" and fraud_risk in ("LOW", "NOT_ASSESSABLE"):
+                        cached_resp_dict["assessment"]["action"] = "NO_ACTION_FLAGGED"
+                    else:
+                        cached_resp_dict["assessment"]["action"] = "VERIFY"
+
+                    if cached_resp_dict.get("evidence") and cached_resp_dict["evidence"].get("metadata"):
+                        cached_resp_dict["evidence"]["metadata"]["exact_verified_match"] = True
+                        cached_resp_dict["evidence"]["metadata"]["verified_ground_truth"] = exact_verified_record
+
                 if cached_resp_dict.get("evidence") and cached_resp_dict["evidence"].get("metadata"):
                     cached_resp_dict["evidence"]["metadata"]["cached_reanalysis"] = True
                 cache_note = f"⚡ Fast Re-Analysis: Exact media binary matched in persistent cache ({active_adapter}); results retrieved instantly without redundant re-inference."
